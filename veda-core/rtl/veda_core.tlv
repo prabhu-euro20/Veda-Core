@@ -35,13 +35,28 @@
    //  item 1 for the full reasoning). 256 entries this milestone (real
    //  silicon-area scoping, not Sail's own 8.4M-entry ID space), 16 bytes
    //  each: Base(32) + Length(16) + Perms(16) + generation(8) + valid(8,
-   //  really 1 bit, byte-aligned for simple addressing) = 80 bits used of
-   //  128 available, same byte-addressable-array convention already used
+   //  really 1 bit, byte-aligned for simple addressing) + owner_hart(8,
+   //  Milestone 12 addition, byte offset +10, one of the six previously-
+   //  spare bytes in this 16-byte window) = 88 bits used of 128
+   //  available, same byte-addressable-array convention already used
    //  for elfmem/dmem below, not a new idiom.
    // ───────────────────────────────────────────────────────────────────
    localparam bit [31:0] ODT_BASE = 32'h9000_0000;
    localparam int ODT_ENTRIES = 256;
    localparam int ODT_ENTRY_BYTES = 16;
+   // RTL MILESTONE 12: this single-core RTL's own fixed hart identity --
+   // no real MHARTID CSR/concept existed anywhere in this file before
+   // now (a genuine new architectural constant, not a repurposed one).
+   // Fixed at 0, the real, standard RISC-V single-hart convention
+   // (mirrors Sail's own veda_test_sail.json single-hart config, which
+   // also fixes mhartid=0) -- extendable to a real per-instance value if
+   // this core is ever replicated into an actual multi-hart system
+   // (NEXT_STEPS_ROADMAP.md §2.7's own still-open, explicitly deferred
+   // item), not attempted here.
+   localparam bit [7:0] MHARTID = 8'h00;
+   // Sentinel for "no live owner yet" -- matches Sail's own
+   // VEDA_OWNER_UNOWNED (veda_types.sail) byte-for-byte, not re-chosen.
+   localparam bit [7:0] VEDA_OWNER_UNOWNED = 8'hFF;
    logic [7:0] odt_mem [ODT_BASE : ODT_BASE + (ODT_ENTRIES * ODT_ENTRY_BYTES) - 1];
    initial begin
       // Milestone 1 test scaffold, explicitly temporary -- mirrors Sail
@@ -62,6 +77,12 @@
       {odt_mem[ODT_BASE+16+7], odt_mem[ODT_BASE+16+6]} = 16'h100C;
       odt_mem[ODT_BASE+16+8] = 8'h00;
       odt_mem[ODT_BASE+16+9] = 8'h01;
+      // Milestone 12 addition: reset-seeded objects start genuinely
+      // unowned (matches Sail's own veda_test_seed_odt() field-for-
+      // field), not owned by hart 0 by default -- Bind's own real claim
+      // logic (below) is what's actually under test, not a fixture that
+      // pre-empts it.
+      odt_mem[ODT_BASE+16+10] = VEDA_OWNER_UNOWNED;
       // Milestone 2 addition: a second seeded object, deliberately
       // *without* Permit_NMC_Compute (Perms = 0x000C, Load+Store only),
       // so a real negative-control test can confirm NMC_ADD's own
@@ -74,6 +95,30 @@
       {odt_mem[ODT_BASE+32+7], odt_mem[ODT_BASE+32+6]} = 16'h000C;
       odt_mem[ODT_BASE+32+8] = 8'h00;
       odt_mem[ODT_BASE+32+9] = 8'h01;
+      odt_mem[ODT_BASE+32+10] = VEDA_OWNER_UNOWNED;
+      // Milestone 12 addition: Object_ID=60 -> byte offset 60*16=960, a
+      // THIRD seeded object, pre-claimed by owner_hart=0x63 (99 decimal)
+      // -- a stand-in "other hart," since this single-core RTL testbench
+      // has no real second hart to own anything with (mirrors Sail's own
+      // identical Milestone 12 fixture, veda_regs.sail's Object_ID=5
+      // entry, same real reason: direct ODT-state injection is the only
+      // way this project's own single-hart test environments can prove
+      // a wrong-owner outcome at all). Object_ID=60 chosen specifically
+      // because it's the one value genuinely unused anywhere else in
+      // this project's own existing RTL test corpus (confirmed by
+      // grepping every veda_smoke_*.S file before picking it -- Object_
+      // ID=3 was tried first and found to collide with Milestone 4's own
+      // "never seeded at reset" fresh-mint precondition, a real bug
+      // caught by that pre-existing test, not a hypothetical one).
+      // Base=0x80010200, Length=0x40, Perms=0x000C (Load+Store), so this
+      // fixture is also usable as an ordinary-looking object in every
+      // respect except ownership.
+      {odt_mem[ODT_BASE+960+3], odt_mem[ODT_BASE+960+2], odt_mem[ODT_BASE+960+1], odt_mem[ODT_BASE+960+0]} = 32'h8001_0200;
+      {odt_mem[ODT_BASE+960+5], odt_mem[ODT_BASE+960+4]} = 16'h0040;
+      {odt_mem[ODT_BASE+960+7], odt_mem[ODT_BASE+960+6]} = 16'h000C;
+      odt_mem[ODT_BASE+960+8] = 8'h00;
+      odt_mem[ODT_BASE+960+9] = 8'h01;
+      odt_mem[ODT_BASE+960+10] = 8'h63;
    end
 
    // ═══════════════════════════════════════════════════════════════════
@@ -854,6 +899,25 @@
          $veda_odt_perms[15:0]  = {odt_mem[$veda_odt_addr+7], odt_mem[$veda_odt_addr+6]};
          $veda_odt_gen[7:0]     = odt_mem[$veda_odt_addr+8];
          $veda_odt_valid        = odt_mem[$veda_odt_addr+9][0];
+         // Milestone 12: the owner-hart byte, read alongside every other
+         // ODT field above -- an object with no live owner yet
+         // (VEDA_OWNER_UNOWNED), or one this same hart already owns, is
+         // fair game for Bind/Rebind to claim (or re-claim, idempotently)
+         // -- mirrors veda_bind_insts.sail's own `owner_ok` boolean
+         // field-for-field.
+         $veda_odt_owner[7:0]  = odt_mem[$veda_odt_addr+10];
+         $veda_owner_ok        = ($veda_odt_owner == VEDA_OWNER_UNOWNED) || ($veda_odt_owner == MHARTID);
+         // Milestone 12: plain Bind's own real, genuine hard-trap --
+         // a LIVE object owned by a genuinely different hart, distinct
+         // in kind from "object not found" ($veda_odt_valid=0, still
+         // RTL's existing deferred soft-fail per Milestone 9's own
+         // documented, unrelated gap -- MILESTONE_9_RESULTS.md). Joins
+         // the combined trap-taken family below. Bind-NoTrap never
+         // participates here at all (matches its own established
+         // soft-fail-always convention; only plain Bind is gated by
+         // $is_veda_bind_plain), mirroring veda_bind_insts.sail's own
+         // exact mode split.
+         $veda_bind_owner_violation = $is_veda_bind_plain && $veda_odt_valid && !$veda_owner_ok;
 
          // ─────────────────────────────────────────────────────────
          //  RTL Milestone 8: Rebind reads its OWN destination register
@@ -871,7 +935,32 @@
          // ─────────────────────────────────────────────────────────
          $veda_rdcap_otype[15:0] = /vreg[$veda_rd_cap]$otype;
          $veda_rebind_sealed     = ($veda_rdcap_otype != 16'hFFFF);
-         $veda_rebind_ok         = !$veda_rebind_sealed && $veda_odt_valid;
+         // Milestone 12: a wrong-owner ODT entry joins "sealed rd" and
+         // "ODT miss" as a THIRD soft-fail reason for Rebind -- Rebind
+         // never hard-traps for ANY failure reason (Section 1's
+         // manipulate-vs-use split), matching veda_bind_insts.sail's own
+         // VEDA_REBIND match arm, which folds all three into the same
+         // uniform soft-fail branch.
+         $veda_rebind_ok         = !$veda_rebind_sealed && $veda_odt_valid && $veda_owner_ok;
+         // Milestone 12: real claim/re-claim write-back, shared by both
+         // Bind's and Rebind's own success paths below -- mirrors
+         // veda_bind_insts.sail's own `claimed_entry`, written on every
+         // successful Bind/Bind-NoTrap/Rebind regardless of whether
+         // owner_hart was already MHARTID or VEDA_OWNER_UNOWNED (an
+         // idempotent re-claim is still a real write, matching Sail
+         // exactly). Deliberately excludes plain Bind's own hard-trap
+         // path ($veda_bind_owner_violation, defined further below) --
+         // mutually exclusive by construction, since that path requires
+         // !$veda_owner_ok while this one requires $veda_owner_ok.
+         $veda_bind_claim_en     = ($is_veda_bind_plain || $is_veda_bind_notrap) &&
+                                    $veda_odt_valid && $veda_owner_ok;
+         $veda_rebind_claim_en   = $is_veda_rebind && $veda_rebind_ok;
+         $veda_owner_claim_en    = $veda_bind_claim_en || $veda_rebind_claim_en;
+         // Only consumed by the trailing raw \SV always_ff block below,
+         // the same real reason $veda_odtpd_new_gen/etc. already needed
+         // this (invisible to SandPiper's own TLV-level dependency
+         // tracking otherwise).
+         `BOGUS_USE($veda_owner_claim_en)
 
          // ─────────────────────────────────────────────────────────
          //  VEDA-CORE RTL MILESTONE 4: ODT-Populate/ODT-Destroy
@@ -971,7 +1060,18 @@
             // real gap closed here: previously mode=10/11 fell through
             // to this same path too, silently mis-executing Rebind as
             // plain Bind. Rebind now has its own write path below.
+            // Milestone 12: plain Bind's own wrong-owner hard-trap
+            // ($veda_bind_owner_violation, defined further below) must
+            // leave rd COMPLETELY untouched, not even Tag cleared --
+            // matches Sail exactly (veda_trap() diverts control flow
+            // before wC()/wCTag() are ever called on that path). Mirrors
+            // OCInvoke's own identical `!violation` exclusion already
+            // established for this same reason (RTL Milestone 10).
+            // Bind-NoTrap can never set $veda_bind_owner_violation (only
+            // plain Bind can), so its own wrong-owner soft-fail path
+            // below is unaffected by this exclusion.
             $bind_wr_en = (|cpu>>1$is_veda_bind_plain || |cpu>>1$is_veda_bind_notrap) &&
+                          !|cpu>>1$veda_bind_owner_violation &&
                           (|cpu>>1$veda_rd_cap == #vreg);
             // Rebind: a genuinely different write shape from every
             // other source in this mux -- on failure (sealed rd, or an
@@ -1038,7 +1138,20 @@
             $ospecialrw_wr_en = |cpu>>1$is_veda_ospecialrw && !|cpu>>1$veda_ospecialrw_violation &&
                                 (|cpu>>1$veda_rd_cap == #vreg);
             $tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
-                   $bind_wr_en       ? |cpu>>1$veda_odt_valid :
+                   // Milestone 12: Bind/Bind-NoTrap's own success now
+                   // additionally requires owner_ok -- a wrong-owner
+                   // live object soft-fails here exactly like an ODT
+                   // miss already did (Tag cleared, same as before;
+                   // Bind-NoTrap's OTHER fields still carry over from
+                   // the wrong object's real ODT entry below, dead
+                   // either way once Tag=0 -- the same established,
+                   // accepted convention already governing every other
+                   // "$bind_wr_en fires unconditionally, only Tag is
+                   // gated" soft-fail path in this mux, not a new
+                   // concession). Plain Bind's OWN wrong-owner case
+                   // never reaches this line at all -- $bind_wr_en
+                   // itself is already false then (the exclusion above).
+                   $bind_wr_en       ? (|cpu>>1$veda_odt_valid && |cpu>>1$veda_owner_ok) :
                    // Rebind: 1 only on the real success path (rd wasn't
                    // already sealed, AND the ODT entry is valid) --
                    // covers both soft-fail cases (sealed rd; ODT miss)
@@ -1694,10 +1807,18 @@
          // -- $veda_trap_cap_idx below resolves that per-family, falling
          // back to the shared field for every family that only ever
          // involves one capability register.
+         // RTL Milestone 12 addition: plain Bind's own owner-violation
+         // joins the same combined trap-taken family too. Its cap_idx is
+         // rd (the destination capability register, $veda_rd_cap), NOT
+         // rs1 -- mirrors veda_bind_insts.sail's own `veda_trap(rd,
+         // VEDA_CAUSE_OWNER_VIOLATION)` call exactly (every other family
+         // here traps on the capability being DEREFERENCED, rs1; Bind's
+         // own cap_idx is the capability being WRITTEN, rd).
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
-                             $veda_atomic_violation || $veda_ocinvoke_violation;
+                             $veda_atomic_violation || $veda_ocinvoke_violation ||
+                             $veda_bind_owner_violation;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
             $veda_ocs_violation       ? $veda_ocs_cause :
@@ -1707,8 +1828,11 @@
             $veda_nmc_add_d_violation ? $veda_nmc_add_d_cause :
             $veda_atomic_violation    ? $veda_atomic_cause :
             $veda_ocinvoke_violation  ? $veda_ocinvoke_cause :
+            $veda_bind_owner_violation ? 5'h06 :
                                         5'b0;
-         $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation ? $veda_ocinvoke_cap_idx : $veda_ocl_ocs_rs1_cap;
+         $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation    ? $veda_ocinvoke_cap_idx :
+                                    $veda_bind_owner_violation ? $veda_rd_cap :
+                                                                  $veda_ocl_ocs_rs1_cap;
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 9: real Zicsr-lite CSR state. mtvec and mepc
@@ -2434,6 +2558,21 @@
       end else if (act4_mode && CPU_is_veda_odt_destroy_a0 && !CPU_veda_odt_destroy_violation_a0) begin
          odt_mem[CPU_veda_odt_addr_a0+8] <= CPU_veda_odtpd_new_gen_a0;
          odt_mem[CPU_veda_odt_addr_a0+9] <= 8'h00;
+      end
+   end
+
+   // VEDA-CORE RTL MILESTONE 12: owner-hart claim/re-claim write-back --
+   // the real, first-time consumer of odt_mem[]'s own byte offset +10.
+   // Fires on every successful Bind/Bind-NoTrap/Rebind (gated by
+   // CPU_veda_owner_claim_en_a0, already mutually exclusive from plain
+   // Bind's own hard-trap path by construction -- see the TLV-side
+   // comment above), claiming the ODT slot for MHARTID regardless of
+   // whether it was already unowned or already owned by this same hart
+   // -- mirrors veda_bind_insts.sail's own unconditional `claimed_entry`
+   // write on every success path, not just first-time claims.
+   always_ff @(posedge clk) begin
+      if (act4_mode && CPU_veda_owner_claim_en_a0) begin
+         odt_mem[CPU_veda_odt_addr_a0+10] <= MHARTID;
       end
    end
 

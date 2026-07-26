@@ -57,13 +57,18 @@ privilege can never actually drop below Machine there, making a
 genuinely privilege-independent proof structurally impossible in Sail
 with the existing config — RTL's own independent `veda.droppriv`
 supplied the one real, end-to-end proof instead. Zero design/Sail/RTL
-bugs found this milestone, a first since Milestone 8. **Tier 3 item 7
-(real multi-core, §2.7) remains open** — it was never blocked on any of
-this work, and is a real, distinct, substantial undertaking of its own
-(new multi-hart RTL architecture, shared-ODT arbitration, and the
-owner-hart hardware enforcement `VEDA_CORE_SPEC.md` §4.1 itself already
-flags as still-undesigned future work, not just an RTL-instantiation
-task). This document otherwise remains a point-in-time analysis; the
+bugs found this milestone, a first since Milestone 8. The owner-hart
+hardware enforcement piece of Tier 3 item 7 is now **done** — see
+`rtl/MILESTONE_12_RESULTS.md`: a real `owner_hart` byte in every ODT
+entry, checked and claimed at Bind/Rebind time in both Sail and RTL,
+closing `VEDA_CORE_SPEC.md` §4.1's own long-named gap. **The remaining
+half of Tier 3 item 7 — real multi-hart RTL architecture and shared-ODT
+arbitration between genuinely concurrent harts — stays open**; it was
+always the larger, separate undertaking, and owner-hart enforcement was
+verified via direct ODT-state injection standing in for a second hart
+(neither this project's single-process Sail simulator nor its
+single-core RTL can produce one), not genuine concurrent execution.
+This document otherwise remains a point-in-time analysis; the
 recommendation below should be re-read in that light, not assumed still
 current for every item — Tier 4 items remain exactly as originally
 assessed below.

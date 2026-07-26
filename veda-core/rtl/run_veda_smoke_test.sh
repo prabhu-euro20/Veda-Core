@@ -152,6 +152,16 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m11neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_
 echo "==> Simulating (Milestone 11 negative)"
 vvp "$SIM/sim_m11neg.vvp" +elf_hex="$SIM/veda_smoke_m11_neg.hex"
 
+echo "==> Milestone 12: Compiling (owner-hart ODT enforcement, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m12.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m12.sv"
+echo "==> Simulating (Milestone 12 positive)"
+vvp "$SIM/sim_m12.vvp" +elf_hex="$SIM/veda_smoke_m12.hex"
+
+echo "==> Milestone 12: Compiling (wrong-owner hard-trap, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m12neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m12_neg.sv"
+echo "==> Simulating (Milestone 12 negative)"
+vvp "$SIM/sim_m12neg.vvp" +elf_hex="$SIM/veda_smoke_m12_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
