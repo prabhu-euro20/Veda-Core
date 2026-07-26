@@ -167,6 +167,16 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m13neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_
 echo "==> Simulating (Milestone 13 negative)"
 vvp "$SIM/sim_m13neg.vvp" +elf_hex="$SIM/veda_smoke_m13_neg.hex"
 
+echo "==> Milestone 14: Compiling (PCC compartment bounding, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m14.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m14.sv"
+echo "==> Simulating (Milestone 14 positive)"
+vvp "$SIM/sim_m14.vvp" +elf_hex="$SIM/veda_smoke_m14.hex"
+
+echo "==> Milestone 14: Compiling (compartment escape hard-trap, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m14neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m14_neg.sv"
+echo "==> Simulating (Milestone 14 negative)"
+vvp "$SIM/sim_m14neg.vvp" +elf_hex="$SIM/veda_smoke_m14_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

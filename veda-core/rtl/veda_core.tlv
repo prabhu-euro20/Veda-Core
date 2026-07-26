@@ -515,6 +515,28 @@
                                                 >>1$pc + 64'd4;
 
          // ─────────────────────────────────────────────────────────
+         //  RTL MILESTONE 14 (Sail mirror, veda-core/MILESTONE_14_RESULTS.md
+         //  / PCC_COMPARTMENT_DESIGN.md): PCC compartment bounding --
+         //  bounding execution inside an OCInvoke-entered compartment.
+         //  $veda_pcc_base/$veda_pcc_length (defined further below,
+         //  alongside $mtvec/$mepc -- SandPiper's own combinational-
+         //  elaboration-is-order-independent pattern already used
+         //  throughout this file, e.g. $veda_trap_taken referenced here
+         //  before its own definition too) hold the currently-active
+         //  compartment's own bounds, narrowed away from
+         //  VEDA_PCC_UNBOUNDED (16'hFFFF, the reset/no-compartment
+         //  sentinel) only by a successful OCInvoke. This check is
+         //  genuinely unconditional, every cycle, against the CURRENT
+         //  $pc -- distinct in kind from every other check in this file,
+         //  none of which are gated on a decoded opcode; Sail's own
+         //  mirror (postlude/step_ext.sail's ext_fetch_check_pc) is
+         //  identically unconditional, called before every fetch.
+         // ─────────────────────────────────────────────────────────
+         $veda_pcc_violation = ($veda_pcc_length != 16'hFFFF) &&
+                                (($pc[31:0] < $veda_pcc_base) ||
+                                 ($pc[31:0] >= ($veda_pcc_base + {16'b0, $veda_pcc_length})));
+
+         // ─────────────────────────────────────────────────────────
          //  INSTRUCTION MEMORY — Milestone A/B hand-assembled ROM[]
          //  (pc[8:2] gives a 7-bit index, 0-127, byte addresses 0-508,
          //  comfortably covering ROM_SIZE=81), or Milestone C's
@@ -523,7 +545,22 @@
          // ─────────────────────────────────────────────────────────
          $instr_rom[31:0]  = ROM[($pc[8:2] >= ROM_SIZE) ? ROM_SIZE - 1 : $pc[8:2]];
          $instr_elf[31:0]  = {elfmem[$pc[31:0]+3], elfmem[$pc[31:0]+2], elfmem[$pc[31:0]+1], elfmem[$pc[31:0]+0]};
-         $instr[31:0] = act4_mode ? $instr_elf : $instr_rom;
+         // RTL Milestone 14: on a PCC bounds violation, $instr is forced
+         // to a real, standard NOP encoding (0x00000013 = ADDI x0,x0,0)
+         // rather than whatever arbitrary bytes happen to live at the
+         // out-of-bounds $pc -- the single, minimal change that
+         // correctly suppresses every possible downstream GPR/capability
+         // -register/memory write path this cycle (a NOP targeting x0
+         // triggers no real write anywhere in the file), matching Sail's
+         // own real behavior of never reaching decode/execute at all on
+         // a failed fetch, without needing to individually audit and
+         // gate every one of this file's many independent write paths.
+         // The real trap itself (mcause/mepc/mtval/PC-redirect) is still
+         // delivered via $veda_pcc_violation joining $veda_trap_taken
+         // below, entirely independent of what $instr decodes to.
+         $instr[31:0] = $veda_pcc_violation ? 32'h00000013 :
+                        act4_mode           ? $instr_elf :
+                                               $instr_rom;
 
          // ─────────────────────────────────────────────────────────
          //  DECODE
@@ -595,6 +632,17 @@
          $csr_is_mepc    = ($csr_addr == 12'h341);
          $csr_is_mcause  = ($csr_addr == 12'h342);
          $csr_is_mtval   = ($csr_addr == 12'h343);
+         // RTL Milestone 14: four new CSRs, the real, standard RISC-V
+         // "Machine-level Custom read/write" address range (riscv-spec.pdf
+         // Table 91, p.664, 0x7C0-0x7FF) -- verified against the real
+         // spec, the same real range convention already trusted once for
+         // mtvec/mepc/mcause/mtval above, and the identical four
+         // addresses already chosen and verified on the Sail side
+         // (veda_regs.sail).
+         $csr_is_veda_pcc_base     = ($csr_addr == 12'h7C0);
+         $csr_is_veda_pcc_length   = ($csr_addr == 12'h7C1);
+         $csr_is_veda_mepcc_base   = ($csr_addr == 12'h7C2);
+         $csr_is_veda_mepcc_length = ($csr_addr == 12'h7C3);
 
          // MRET: the one, fixed 32-bit encoding (funct12=0b001100000010,
          // rs1=rd=0, funct3=0, opcode=SYSTEM) -- matched as a single
@@ -1831,11 +1879,22 @@
          // for both cause codes (every other family here traps on the
          // capability being DEREFERENCED, rs1; Bind's own cap_idx is the
          // capability being WRITTEN, rd).
+         // RTL Milestone 14 addition: $veda_pcc_violation joins the same
+         // combined trap-taken family -- its own cap_idx (16, the PCC
+         // sentinel) and cause (0x01, reused) are both fixed constants,
+         // built directly into $mtval's own construction below rather
+         // than routed through $veda_trap_cap_idx[3:0] (only 4 bits wide,
+         // can't carry the 5-bit sentinel value 16 without a wider,
+         // more invasive change to every existing call site) -- the
+         // identical "built inline, not through the typed interface"
+         // choice already made on the Sail side (veda_bind_insts.sail's
+         // veda_trap() vs. the PCC hook's own direct handle_exception()
+         // call).
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
-                             $veda_bind_trap;
+                             $veda_bind_trap || $veda_pcc_violation;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
             $veda_ocs_violation       ? $veda_ocs_cause :
@@ -1871,6 +1930,10 @@
                              $csr_is_mepc   ? $mepc :
                              $csr_is_mcause ? $mcause :
                              $csr_is_mtval  ? $mtval :
+                             $csr_is_veda_pcc_base     ? {32'b0, $veda_pcc_base} :
+                             $csr_is_veda_pcc_length   ? {48'b0, $veda_pcc_length} :
+                             $csr_is_veda_mepcc_base   ? {32'b0, $veda_mepcc_base} :
+                             $csr_is_veda_mepcc_length ? {48'b0, $veda_mepcc_length} :
                                               64'b0;
          // CSRRS with rs1=x0 must not write the CSR at all (real
          // RISC-V's own rule, VEDA_CORE... no -- the base Zicsr spec
@@ -1920,8 +1983,58 @@
                         // veda_bind_insts.sail's own source, the same
                         // encoding already cross-checked once this
                         // session for the Sail-side atomic8 test.
-                        (>>1$veda_trap_taken) ? {55'b0, >>1$veda_trap_cap_idx, >>1$veda_trap_cause} :
+                        // RTL Milestone 14: the PCC-violation case is
+                        // special-cased here directly (cap_idx=5'b10000,
+                        // cause=5'b00001) rather than going through
+                        // $veda_trap_cap_idx[3:0]/$veda_trap_cause[4:0]
+                        // (see $veda_trap_taken's own comment above).
+                        (>>1$veda_trap_taken) ? (>>1$veda_pcc_violation ? {54'b0, 5'b10000, 5'b00001}
+                                                                         : {55'b0, >>1$veda_trap_cap_idx, >>1$veda_trap_cause}) :
                                                  >>1$mtval;
+
+         // ─────────────────────────────────────────────────────────
+         //  RTL MILESTONE 14: veda_pcc_base/veda_pcc_length (the live
+         //  compartment) and veda_mepcc_base/veda_pcc_length (the saved
+         //  copy across a trap) -- the same real persistent-signal idiom
+         //  $mtvec/$mepc already established (Milestone 9), applied to a
+         //  new, genuinely different kind of state (a fetch-time bound,
+         //  not an ordinary CSR value alone). Reset to
+         //  VEDA_PCC_UNBOUNDED (16'hFFFF) -- a real correctness
+         //  requirement, not styling: left at 0 by default, every fetch
+         //  would bounds-check against an empty window at address 0 and
+         //  hard-trap on the very first cycle (the identical real reason
+         //  already named on the Sail side, postlude/step_ext.sail).
+         //  Priority order, matching veda_trap()'s own real behavior on
+         //  the Sail side field-for-field: (1) a real trap always wins --
+         //  save the live bounds into mepcc, reset pcc to unbounded so
+         //  the trap handler itself runs in a trusted, unconstrained
+         //  context (real CHERI's own "Exception Code Capability"
+         //  requirement); (2) a successful OCInvoke narrows pcc to the
+         //  invoked code capability's own Base/Length; (3) an explicit
+         //  CSRRW/CSRRS to one of the four new addresses -- this
+         //  project's own established "software, not hardware, restores
+         //  across mret" convention (mepc's own explicit
+         //  advance-before-mret since Milestone 9, carried forward here
+         //  rather than inventing an automatic mechanism); (4) retain.
+         // ─────────────────────────────────────────────────────────
+         $veda_pcc_base[31:0] = $reset ? 32'b0 :
+                                 (>>1$veda_trap_taken) ? 32'b0 :
+                                 (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_base :
+                                 (>>1$csr_write_en && >>1$csr_is_veda_pcc_base) ? >>1$csr_wdata[31:0] :
+                                                                                   >>1$veda_pcc_base;
+         $veda_pcc_length[15:0] = $reset ? 16'hFFFF :
+                                   (>>1$veda_trap_taken) ? 16'hFFFF :
+                                   (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_length :
+                                   (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[15:0] :
+                                                                                       >>1$veda_pcc_length;
+         $veda_mepcc_base[31:0] = $reset ? 32'b0 :
+                                   (>>1$veda_trap_taken) ? >>1$veda_pcc_base :
+                                   (>>1$csr_write_en && >>1$csr_is_veda_mepcc_base) ? >>1$csr_wdata[31:0] :
+                                                                                       >>1$veda_mepcc_base;
+         $veda_mepcc_length[15:0] = $reset ? 16'hFFFF :
+                                     (>>1$veda_trap_taken) ? >>1$veda_pcc_length :
+                                     (>>1$csr_write_en && >>1$csr_is_veda_mepcc_length) ? >>1$csr_wdata[15:0] :
+                                                                                           >>1$veda_mepcc_length;
 
          // OCA is deliberately absent here -- its destination (rd) is a
          // Capability Register, not a GPR (VEDA_CORE_SPEC.md Section 1:

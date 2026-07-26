@@ -112,8 +112,18 @@ it: a module-ordering conflict (`core` compiles before `Veda`, so the
 fetch-check hook's real body had to move to `postlude/step_ext.sail`,
 which already requires `Veda_insts`) and a pre-existing Milestone 10
 test whose own `Length` fixture needed widening now that the field is
-genuinely checked rather than decorative. Tier 3 item 5 is **closed on
-Sail; the RTL mirror is its own remaining, not-yet-started item**.
+genuinely checked rather than decorative. **The RTL mirror is now also
+done** (`veda-core/rtl/MILESTONE_14_RESULTS.md`), the same day: `$instr`
+is forced to a real NOP on a PCC violation -- a single, minimal change
+that correctly suppresses every downstream write path at the source
+rather than auditing each one individually, since this is the one check
+in the whole file that's genuinely unconditional rather than gated on a
+decoded opcode. Found and fixed two real bugs via an actual
+cycle-by-cycle debug trace, neither in the trap mechanism itself (which
+worked first try): a second real instance of the Milestone-13-taught
+Object_ID-collision class, and two testbenches' own underestimated
+cycle budgets. 25/25 RTL tests passing. **Tier 3 item 5 is now fully
+closed, in both Sail and RTL.**
 This document otherwise remains a point-in-time analysis; the
 recommendation below should be re-read in that light, not assumed still
 current for every item — Tier 4 items remain exactly as originally
