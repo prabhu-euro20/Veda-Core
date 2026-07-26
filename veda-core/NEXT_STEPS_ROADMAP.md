@@ -68,7 +68,18 @@ always the larger, separate undertaking, and owner-hart enforcement was
 verified via direct ODT-state injection standing in for a second hart
 (neither this project's single-process Sail simulator nor its
 single-core RTL can produce one), not genuine concurrent execution.
-This document otherwise remains a point-in-time analysis; the
+**Milestone 13** (`rtl/MILESTONE_13_RESULTS.md`) then closed
+`MILESTONE_9_RESULTS.md`'s own separately-named, deliberately-deferred
+gap: plain `Bind`'s ODT-miss hard-trap (`cause = 0x05`) is now real in
+RTL too (Sail already had it). A full grep of the existing test corpus
+before writing any RTL found five pre-existing tests relying on plain
+`Bind`'s old soft-fail behavior against a never-populated/destroyed
+`Object_ID`; each was fixed by switching to `Bind-NoTrap` — the
+already-correct instruction for that purpose since Milestone 8 — not a
+workaround. Also closed a real, previously-unnoticed Sail-side
+test-coverage gap (no self-check test had ever directly asserted this
+trap's own `mcause`/`mtval`, despite the Sail behavior itself existing
+for many milestones). This document otherwise remains a point-in-time analysis; the
 recommendation below should be re-read in that light, not assumed still
 current for every item — Tier 4 items remain exactly as originally
 assessed below.

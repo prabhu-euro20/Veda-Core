@@ -39,7 +39,14 @@ _start:
 
     .word 0x0600948b                 # veda.odt.destroy x9, x1   -- invalidate Object_ID=3, bump generation
 
-    .word 0x0000d08b                 # veda.bind c1, x1   -- rebind against the now-destroyed Object_ID -- expect c1.Tag=0 (ODT entry invalid)
+    # Milestone 13 update: plain Bind against a destroyed (now invalid)
+    # Object_ID genuinely hard-traps on its own since this milestone
+    # (cause 0x05, object-not-found) -- this test's own real subject is
+    # the ODT-Populate/Bind/Destroy lifecycle, not Bind's own trap
+    # delivery (covered separately), so Bind-NoTrap -- the
+    # architecturally correct "soft-fail, don't disrupt control flow"
+    # instruction since Milestone 8 -- replaces plain Bind here.
+    .word 0x0010d08b                 # veda.bind.notrap c1, x1   -- rebind against the now-destroyed Object_ID -- expect c1.Tag=0 (ODT entry invalid)
     .word 0x0600855b                 # cgettag x10, c1    -- expect 0
 
     li   x11, 0xDEAD                 # sentinel -- must survive untouched below

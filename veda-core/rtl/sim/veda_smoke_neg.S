@@ -24,11 +24,20 @@ _start:
     // (never populated by any RTL milestone's own reset scaffold or any
     // other test in this suite) and a real trap-handler that checks
     // mcause/mtval directly, not a raw memory snapshot.
+    //
+    // Milestone 13 update: plain Bind against a never-populated
+    // Object_ID now genuinely hard-traps on its own (cause 0x05), which
+    // would divert control flow before OCS.D below is ever reached --
+    // this test's own real point is OCS.D's Tag check, not Bind's own
+    // object-not-found trap (covered separately). Bind-NoTrap is the
+    // architecturally correct instruction for "produce an untagged
+    // capability without disrupting control flow" -- exactly its own
+    // purpose since Milestone 8 -- so this Bind is switched to it here.
     la    t0, trap_handler
     csrw  mtvec, t0
 
     li    x1, 50
-    .word 0x0000d00b     // veda.bind c0, x1 (Object_ID=50, never populated -> c0.Tag=0)
+    .word 0x0010d00b     // veda.bind.notrap c0, x1 (Object_ID=50, never populated -> c0.Tag=0)
     li    x2, 0
     li    x3, 0x9999      // a value that must never actually land in memory
 fault_instr:

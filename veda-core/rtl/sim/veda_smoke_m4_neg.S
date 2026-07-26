@@ -16,7 +16,15 @@ _start:
     li   x2, 0x800103000040100C      # attempted descriptor -- must never actually land
     .word 0x0620828b                 # veda.odt.populate x5, x1, x2  -- must be suppressed (!$priv)
 
-    .word 0x0000d00b                 # veda.bind c0, x1   -- expect c0.Tag=0 (Object_ID=5's ODT entry was never populated)
+    # Milestone 13 update: this file installs no trap handler at all
+    # (mtvec stays at its reset value, 0) -- plain Bind against a
+    # never-populated Object_ID now genuinely hard-traps on its own
+    # (cause 0x05), which would jump to address 0 here, undefined for
+    # this test. This test's own real subject is ODT-Populate's
+    # privilege gate, not Bind's own trap delivery -- Bind-NoTrap
+    # (the correct "soft-fail" instruction since Milestone 8) is used
+    # instead, preserving the test's original intent exactly.
+    .word 0x0010d00b                 # veda.bind.notrap c0, x1   -- expect c0.Tag=0 (Object_ID=5's ODT entry was never populated)
     .word 0x0600035b                 # cgettag x6, c0     -- expect x6 == 0
 1:
     j 1b

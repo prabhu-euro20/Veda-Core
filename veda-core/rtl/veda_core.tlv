@@ -909,15 +909,30 @@
          $veda_owner_ok        = ($veda_odt_owner == VEDA_OWNER_UNOWNED) || ($veda_odt_owner == MHARTID);
          // Milestone 12: plain Bind's own real, genuine hard-trap --
          // a LIVE object owned by a genuinely different hart, distinct
-         // in kind from "object not found" ($veda_odt_valid=0, still
-         // RTL's existing deferred soft-fail per Milestone 9's own
-         // documented, unrelated gap -- MILESTONE_9_RESULTS.md). Joins
+         // in kind from "object not found" (Milestone 13, below). Joins
          // the combined trap-taken family below. Bind-NoTrap never
          // participates here at all (matches its own established
          // soft-fail-always convention; only plain Bind is gated by
          // $is_veda_bind_plain), mirroring veda_bind_insts.sail's own
          // exact mode split.
          $veda_bind_owner_violation = $is_veda_bind_plain && $veda_odt_valid && !$veda_owner_ok;
+         // Milestone 13: plain Bind's own second real hard-trap reason --
+         // object-not-found ($veda_odt_valid=0) -- closing the gap
+         // Milestone 9 itself named and deliberately deferred
+         // (MILESTONE_9_RESULTS.md: "doing so would, for the first time,
+         // make RTL's plain Bind and Bind-NoTrap behaviorally different"
+         // -- a concern Milestone 12 already made moot, since plain
+         // Bind's own owner-violation trap above already created that
+         // exact divergence). Mutually exclusive with
+         // $veda_bind_owner_violation by construction (one requires
+         // $veda_odt_valid, the other requires !$veda_odt_valid) --
+         // combined into one umbrella $veda_bind_trap below, mirroring
+         // veda_bind_insts.sail's own catch-all else-chain exactly
+         // (owner check, THEN object-not-found, mutually exclusive
+         // outcomes of the same `e.valid` test).
+         $veda_bind_notfound_violation = $is_veda_bind_plain && !$veda_odt_valid;
+         $veda_bind_trap = $veda_bind_owner_violation || $veda_bind_notfound_violation;
+         $veda_bind_cause[4:0] = $veda_bind_owner_violation ? 5'h06 : 5'h05;
 
          // ─────────────────────────────────────────────────────────
          //  RTL Milestone 8: Rebind reads its OWN destination register
@@ -1060,18 +1075,18 @@
             // real gap closed here: previously mode=10/11 fell through
             // to this same path too, silently mis-executing Rebind as
             // plain Bind. Rebind now has its own write path below.
-            // Milestone 12: plain Bind's own wrong-owner hard-trap
-            // ($veda_bind_owner_violation, defined further below) must
-            // leave rd COMPLETELY untouched, not even Tag cleared --
-            // matches Sail exactly (veda_trap() diverts control flow
-            // before wC()/wCTag() are ever called on that path). Mirrors
-            // OCInvoke's own identical `!violation` exclusion already
-            // established for this same reason (RTL Milestone 10).
-            // Bind-NoTrap can never set $veda_bind_owner_violation (only
-            // plain Bind can), so its own wrong-owner soft-fail path
-            // below is unaffected by this exclusion.
+            // Milestone 12/13: plain Bind's own two hard-trap reasons
+            // (wrong-owner, object-not-found -- $veda_bind_trap, the
+            // combined umbrella) must leave rd COMPLETELY untouched, not
+            // even Tag cleared -- matches Sail exactly (veda_trap()
+            // diverts control flow before wC()/wCTag() are ever called
+            // on either path). Mirrors OCInvoke's own identical
+            // `!violation` exclusion already established for this same
+            // reason (RTL Milestone 10). Bind-NoTrap can never set
+            // $veda_bind_trap (only plain Bind can), so its own two
+            // soft-fail reasons below are unaffected by this exclusion.
             $bind_wr_en = (|cpu>>1$is_veda_bind_plain || |cpu>>1$is_veda_bind_notrap) &&
-                          !|cpu>>1$veda_bind_owner_violation &&
+                          !|cpu>>1$veda_bind_trap &&
                           (|cpu>>1$veda_rd_cap == #vreg);
             // Rebind: a genuinely different write shape from every
             // other source in this mux -- on failure (sealed rd, or an
@@ -1807,18 +1822,20 @@
          // -- $veda_trap_cap_idx below resolves that per-family, falling
          // back to the shared field for every family that only ever
          // involves one capability register.
-         // RTL Milestone 12 addition: plain Bind's own owner-violation
-         // joins the same combined trap-taken family too. Its cap_idx is
-         // rd (the destination capability register, $veda_rd_cap), NOT
-         // rs1 -- mirrors veda_bind_insts.sail's own `veda_trap(rd,
-         // VEDA_CAUSE_OWNER_VIOLATION)` call exactly (every other family
-         // here traps on the capability being DEREFERENCED, rs1; Bind's
-         // own cap_idx is the capability being WRITTEN, rd).
+         // RTL Milestone 12/13 addition: plain Bind's own two hard-trap
+         // reasons (owner-violation, object-not-found -- combined into
+         // $veda_bind_trap) join the same combined trap-taken family
+         // too. Their shared cap_idx is rd (the destination capability
+         // register, $veda_rd_cap), NOT rs1 -- mirrors
+         // veda_bind_insts.sail's own `veda_trap(rd, ...)` call exactly
+         // for both cause codes (every other family here traps on the
+         // capability being DEREFERENCED, rs1; Bind's own cap_idx is the
+         // capability being WRITTEN, rd).
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
-                             $veda_bind_owner_violation;
+                             $veda_bind_trap;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
             $veda_ocs_violation       ? $veda_ocs_cause :
@@ -1828,11 +1845,11 @@
             $veda_nmc_add_d_violation ? $veda_nmc_add_d_cause :
             $veda_atomic_violation    ? $veda_atomic_cause :
             $veda_ocinvoke_violation  ? $veda_ocinvoke_cause :
-            $veda_bind_owner_violation ? 5'h06 :
+            $veda_bind_trap           ? $veda_bind_cause :
                                         5'b0;
-         $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation    ? $veda_ocinvoke_cap_idx :
-                                    $veda_bind_owner_violation ? $veda_rd_cap :
-                                                                  $veda_ocl_ocs_rs1_cap;
+         $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation ? $veda_ocinvoke_cap_idx :
+                                    $veda_bind_trap          ? $veda_rd_cap :
+                                                                $veda_ocl_ocs_rs1_cap;
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 9: real Zicsr-lite CSR state. mtvec and mepc

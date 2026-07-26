@@ -52,8 +52,15 @@ _start:
     csrr  t1, mtvec
     bne   t1, t0, fail             // round-trip: mtvec really holds the handler address
 
+    // Milestone 13 update: plain Bind against a never-populated
+    // Object_ID now genuinely hard-traps on its own (cause 0x05), which
+    // would divert control flow before OCS.D below is ever reached --
+    // this test's own real subject is OCS.D's Tag-check trap, not
+    // Bind's own object-not-found trap (covered separately). Bind-NoTrap
+    // (the correct "soft-fail" instruction since Milestone 8) is used
+    // instead, preserving this test's original intent exactly.
     li    x1, 99
-    .word 0x0000d00b               // veda.bind c0, x1 (Object_ID=99, never populated -> c0.Tag=0)
+    .word 0x0010d00b               // veda.bind.notrap c0, x1 (Object_ID=99, never populated -> c0.Tag=0)
     li    x2, 0
     li    x3, 0x9999
 fault_instr:
