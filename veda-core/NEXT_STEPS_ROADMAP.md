@@ -79,7 +79,42 @@ already-correct instruction for that purpose since Milestone 8 — not a
 workaround. Also closed a real, previously-unnoticed Sail-side
 test-coverage gap (no self-check test had ever directly asserted this
 trap's own `mcause`/`mtval`, despite the Sail behavior itself existing
-for many milestones). This document otherwise remains a point-in-time analysis; the
+for many milestones). Two more items were then resolved by research
+rather than code: **`ODT-Destroy`'s own owner-hart gating question is
+now permanently closed, not deferred** — `VEDA_CORE_SPEC.md` §4.1 was
+updated with the real reasoning (CHERI ISA spec §2.3.16's own object-
+revocation precedent places that authority with a trusted handler,
+independent of current ownership; `ODT-Destroy` was correctly designed
+already and should stay privilege/ODA-gated, not owner-gated). **Tier 3
+item 5's own long-named "PCC" gap has been rescoped and fully designed**
+(`veda-core/PCC_COMPARTMENT_DESIGN.md`) but deliberately not yet
+implemented: research found real CHERI's own PCC is a universal,
+always-on fetch-time mechanism that doesn't fit Veda-Core's own hybrid,
+opt-in architecture at all — the actual, well-scoped gap is narrower,
+`OCInvoke`'s own currently-incomplete compartmentalization bound (a
+successful `OCInvoke` redirects PC but nothing constrains subsequent
+execution to stay within the invoked capability's own bounds). The
+design doc verifies real, concrete Sail extension hooks for this
+(`ext_fetch_check_pc`/`ext_handle_fetch_check_error`, and new CSR
+addresses `0x7C0`-`0x7C3` in the real RISC-V-spec-reserved custom M-mode
+range) and a real, non-obvious finding along the way — `xret_callback`
+is declared `pure`, so automatic hardware save/restore of compartment
+bounds across a trap isn't available the way it is for `mepc`; the
+design instead makes restoration an explicit software step, consistent
+with `mepc`'s own already-established explicit-advance-before-`mret`
+convention. **That design is now implemented and verified on the Sail
+side** (`veda-core/MILESTONE_14_RESULTS.md`) — `OCInvoke` genuinely
+narrows execution to the invoked compartment's own bounds, fetch outside
+them genuinely hard-traps, and the full save/explicit-restore cycle
+across a real trap and `mret` is proven end to end, 24/24 Sail tests
+passing. Two real, concrete findings surfaced only by actually building
+it: a module-ordering conflict (`core` compiles before `Veda`, so the
+fetch-check hook's real body had to move to `postlude/step_ext.sail`,
+which already requires `Veda_insts`) and a pre-existing Milestone 10
+test whose own `Length` fixture needed widening now that the field is
+genuinely checked rather than decorative. Tier 3 item 5 is **closed on
+Sail; the RTL mirror is its own remaining, not-yet-started item**.
+This document otherwise remains a point-in-time analysis; the
 recommendation below should be re-read in that light, not assumed still
 current for every item — Tier 4 items remain exactly as originally
 assessed below.

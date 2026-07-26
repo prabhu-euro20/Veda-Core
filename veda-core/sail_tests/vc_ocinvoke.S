@@ -18,10 +18,17 @@ _start:
     # Base+Offset(0, fresh bind default) resolves to exactly the target
     # this test jumps to and verifies -- computed at runtime via `la`,
     # not a compile-time constant, since the target is this same file's
-    # own address).
+    # own address). Length=0x0100 (256 bytes) -- Milestone 14 update:
+    # a real, genuine consumer of this Length now exists
+    # (PCC_COMPARTMENT_DESIGN.md's own fetch-time compartment bound,
+    # narrowed to exactly this Base/Length on a successful OCInvoke) --
+    # widened from the original 0x0040 (which landing_pad's own real
+    # code, including RVMODEL_HALT_PASS's own macro expansion, came
+    # close enough to that it's not worth relying on exactly, a real,
+    # fragile boundary this milestone's own enforcement newly exposed).
     la   t0, landing_pad
     slli t0, t0, 32
-    li   t1, 0x00400402
+    li   t1, 0x01000402
     or   t0, t0, t1
     li   x1, 30
     mv   x2, t0
