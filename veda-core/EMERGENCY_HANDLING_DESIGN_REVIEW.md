@@ -283,8 +283,10 @@ provide real hardware read-modify-write atomicity at the object level. The
 multi-core "hardware lock bit" intent is already addressed at the *policy*
 level by the Object-Bind exclusive-ownership design (`VEDA_CORE_SPEC.md`
 §4.1, grounded in real, verified UPMEM precedent) — real, hardware-
-enforceable owner-hart tracking in the ODT entry is explicitly named there
-as the next concrete step, not yet built. No new decision needed here
+enforceable owner-hart tracking in the ODT entry, named here as the next
+concrete step, **is now built and verified** (Milestone 12, both Sail and
+RTL — `owner_hart` in every ODT entry, checked and claimed at
+Bind/Rebind time, `rtl/MILESTONE_12_RESULTS.md`). No new decision needed here
 beyond what's already on record.
 
 ---

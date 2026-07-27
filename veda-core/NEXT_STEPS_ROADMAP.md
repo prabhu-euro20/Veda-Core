@@ -123,7 +123,20 @@ cycle-by-cycle debug trace, neither in the trap mechanism itself (which
 worked first try): a second real instance of the Milestone-13-taught
 Object_ID-collision class, and two testbenches' own underestimated
 cycle budgets. 25/25 RTL tests passing. **Tier 3 item 5 is now fully
-closed, in both Sail and RTL.**
+closed, in both Sail and RTL.** With the two remaining named gaps
+(`OSpecialRW`'s own capability-gating, blocked on a real `Perms`-on-`PCC`
+consumer that doesn't exist yet; real multi-hart RTL, a large separate
+undertaking) both genuinely not ripe for immediate work, this pass
+instead closed a real, previously-unchecked verification gap found while
+looking for what else was honestly left: the base RV64I ACT4 conformance
+suite (51/51) had only ever been run against the separate, untouched
+`rv64i_core.tlv`, never against `veda_core.tlv` itself — the file
+fourteen real RTL milestones have actually modified, including
+Milestone 14's own new every-cycle check touching the central `$instr`
+signal directly. **`veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`: 51/51,
+0 failed, 0 timed out** — real, additional confidence that Veda-Core's
+own additions have not regressed base RV64I correctness, checked against
+the actual file, not a proxy for it.
 This document otherwise remains a point-in-time analysis; the
 recommendation below should be re-read in that light, not assumed still
 current for every item — Tier 4 items remain exactly as originally
