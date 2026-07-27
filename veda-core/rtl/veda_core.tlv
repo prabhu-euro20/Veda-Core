@@ -946,7 +946,26 @@
          $veda_odt_length[15:0] = {odt_mem[$veda_odt_addr+5], odt_mem[$veda_odt_addr+4]};
          $veda_odt_perms[15:0]  = {odt_mem[$veda_odt_addr+7], odt_mem[$veda_odt_addr+6]};
          $veda_odt_gen[7:0]     = odt_mem[$veda_odt_addr+8];
-         $veda_odt_valid        = odt_mem[$veda_odt_addr+9][0];
+         // RTL MILESTONE 15: the low-8-bit ODT index above aliases any
+         // two Object_IDs sharing a low byte onto the same physical
+         // slot -- found via a real empirical reproduction
+         // (ARCHITECTURE_IMPROVEMENT_FINDINGS.md Finding 1), not a
+         // theoretical concern: Object_ID=100 and Object_ID=356
+         // silently overwrote each other's ODT metadata with no trap,
+         // no error, no signal to either party. Bytes +11/+12 of the
+         // 16-byte entry were real, allocated-but-unused space ("88
+         // bits used of 128 available", per this file's own header
+         // comment above) -- store the real upper 15 bits of Object_ID
+         // there on every Populate (below), and require it to match on
+         // every lookup here. A low-byte collision with a DIFFERENT
+         // real Object_ID now reads as "not found" (folded into
+         // $veda_odt_valid itself, so every existing downstream
+         // consumer -- owner_ok, bind_trap, rebind_ok -- inherits the
+         // fix with no other change needed) instead of silently
+         // returning a different object's metadata.
+         $veda_odt_id_hi[14:0] = {odt_mem[$veda_odt_addr+12][6:0], odt_mem[$veda_odt_addr+11]};
+         $veda_odt_id_match    = ($veda_odt_id_hi == $veda_object_id[22:8]);
+         $veda_odt_valid        = odt_mem[$veda_odt_addr+9][0] && $veda_odt_id_match;
          // Milestone 12: the owner-hart byte, read alongside every other
          // ODT field above -- an object with no live owner yet
          // (VEDA_OWNER_UNOWNED), or one this same hart already owns, is
@@ -955,6 +974,25 @@
          // field-for-field.
          $veda_odt_owner[7:0]  = odt_mem[$veda_odt_addr+10];
          $veda_owner_ok        = ($veda_odt_owner == VEDA_OWNER_UNOWNED) || ($veda_odt_owner == MHARTID);
+         // RTL MILESTONE 16: the 8-bit generation counter, empirically
+         // confirmed to wrap after 256 destroy/re-populate cycles on the
+         // same slot, creates a real ABA-problem use-after-free false
+         // negative (a capability cached before the wrap can pass the
+         // staleness check again once the count wraps back to its old
+         // value) -- ARCHITECTURE_IMPROVEMENT_FINDINGS.md Finding 2,
+         // reproduced empirically before any fix was designed. Simply
+         // saturating the counter at 0xFF instead of wrapping is NOT
+         // sufficient by itself -- every future re-populate of the slot
+         // would then also land on 0xFF, making every incarnation from
+         // that point on indistinguishable from every other, a
+         // *permanent* ambiguity instead of a periodic one. The real fix
+         // needs a second bit: once generation would wrap, PERMANENTLY
+         // retire the slot (refuse any future ODT-Populate against it)
+         // instead of reusing 0xFF forever. Uses 1 bit of byte +13, real,
+         // allocated-but-unused space after Milestone 15's own use of
+         // +11/+12 ("88 bits used of 128 available" plus Milestone 15's
+         // 15 more still leaves 3 full spare bytes).
+         $veda_odt_retired     = odt_mem[$veda_odt_addr+13][0];
          // Milestone 12: plain Bind's own real, genuine hard-trap --
          // a LIVE object owned by a genuinely different hart, distinct
          // in kind from "object not found" (Milestone 13, below). Joins
@@ -1063,7 +1101,12 @@
          // elaboration-is-order-independent pattern already used
          // throughout this file (e.g. $veda_trap_taken referencing
          // per-family violation signals defined later in the file).
-         $veda_odt_populate_violation = $is_veda_odt_populate && !($priv || $veda_oda_authorized);
+         // RTL MILESTONE 16 (continued): a retired slot can never be
+         // re-populated -- folded into the SAME $veda_odt_populate
+         // _violation signal that already gates privilege, so it reuses
+         // the established soft-no-op-on-violation write path with no
+         // new plumbing.
+         $veda_odt_populate_violation = $is_veda_odt_populate && (!($priv || $veda_oda_authorized) || $veda_odt_retired);
          $veda_odt_destroy_violation  = $is_veda_odt_destroy  && !($priv || $veda_oda_authorized);
 
          // Sail's own real rule: repopulating a still-valid slot bumps
@@ -1072,8 +1115,14 @@
          // software destroyed the old entry first or overwrote it
          // directly. Destroy always bumps (old entry may or may not have
          // been valid; either way the slot's identity changes).
+         // RTL MILESTONE 16: once already at 0xFF, freeze instead of
+         // wrapping back to 0 -- the retirement write-back below (near
+         // odt_mem[...+13]) is what actually stops the slot from ever
+         // being reused once this point is reached.
          $veda_odtpd_new_gen[7:0] = ($is_veda_odt_destroy || $veda_odt_valid) ?
-                                    ($veda_odt_gen + 8'd1) : $veda_odt_gen;
+                                    (($veda_odt_gen == 8'hFF) ? 8'hFF : ($veda_odt_gen + 8'd1)) : $veda_odt_gen;
+         $veda_odtpd_new_retired = $veda_odt_retired ||
+                                    (($is_veda_odt_destroy || $veda_odt_valid) && ($veda_odt_gen == 8'hFF));
          // Populate: Base/Length/Perms come from rs2's packed descriptor
          // (Section 5.1: Base[31:0] in bits[63:32], Length[15:0] in
          // bits[31:16], Perms[15:0] in bits[15:0]). Destroy: preserved
@@ -1413,7 +1462,16 @@
          $veda_check_odt_idx[7:0]   = $veda_rs1cap_object_id[7:0];
          $veda_check_odt_addr[31:0] = ODT_BASE + ({24'b0, $veda_check_odt_idx} * 32'd16);
          $veda_check_odt_gen[7:0]   = odt_mem[$veda_check_odt_addr+8];
-         $veda_check_odt_valid      = odt_mem[$veda_check_odt_addr+9][0];
+         // RTL MILESTONE 15 (same fix as the Bind-side lookup above):
+         // the dereference-time re-check must also confirm the slot
+         // still holds the SAME real Object_ID the capability was bound
+         // to -- otherwise a capability for Object_ID=100 could keep
+         // successfully dereferencing after Object_ID=356 (a low-byte
+         // alias) took over slot 100, since generation/valid alone
+         // can't tell the two apart.
+         $veda_check_odt_id_hi[14:0] = {odt_mem[$veda_check_odt_addr+12][6:0], odt_mem[$veda_check_odt_addr+11]};
+         $veda_check_odt_id_match    = ($veda_check_odt_id_hi == $veda_rs1cap_object_id[22:8]);
+         $veda_check_odt_valid      = odt_mem[$veda_check_odt_addr+9][0] && $veda_check_odt_id_match;
          $veda_gen_stale = (!$veda_check_odt_valid) || ($veda_check_odt_gen != $veda_rs1cap_reserved);
 
          $veda_sealed        = ($veda_rs1cap_otype != 16'hFFFF);
@@ -2685,9 +2743,23 @@
          odt_mem[CPU_veda_odt_addr_a0+7] <= CPU_veda_odtpd_new_perms_a0[15:8];
          odt_mem[CPU_veda_odt_addr_a0+8] <= CPU_veda_odtpd_new_gen_a0;
          odt_mem[CPU_veda_odt_addr_a0+9] <= 8'h01;
+         // RTL MILESTONE 15: record the real full Object_ID's upper 15
+         // bits in the real, previously-unused bytes +11/+12, so a
+         // later low-byte-aliasing lookup can be told apart from the
+         // object that genuinely owns this slot (the two new checks
+         // above).
+         odt_mem[CPU_veda_odt_addr_a0+11] <= CPU_veda_object_id_a0[15:8];
+         odt_mem[CPU_veda_odt_addr_a0+12] <= {1'b0, CPU_veda_object_id_a0[22:16]};
+         // RTL MILESTONE 16: commit the retirement bit computed above --
+         // once generation would wrap, this slot can never legitimately
+         // distinguish a new object from an old one again, so ODT
+         // -Populate itself is permanently refused for it from here on
+         // ($veda_odt_populate_violation, above).
+         odt_mem[CPU_veda_odt_addr_a0+13] <= {7'b0, CPU_veda_odtpd_new_retired_a0};
       end else if (act4_mode && CPU_is_veda_odt_destroy_a0 && !CPU_veda_odt_destroy_violation_a0) begin
          odt_mem[CPU_veda_odt_addr_a0+8] <= CPU_veda_odtpd_new_gen_a0;
          odt_mem[CPU_veda_odt_addr_a0+9] <= 8'h00;
+         odt_mem[CPU_veda_odt_addr_a0+13] <= {7'b0, CPU_veda_odtpd_new_retired_a0};
       end
    end
 
