@@ -177,6 +177,16 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m14neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_
 echo "==> Simulating (Milestone 14 negative)"
 vvp "$SIM/sim_m14neg.vvp" +elf_hex="$SIM/veda_smoke_m14_neg.hex"
 
+echo "==> Milestone 18: Compiling (VEDA_ODT_POPULATE_FAST + veda_attr CSR, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m18.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m18.sv"
+echo "==> Simulating (Milestone 18 positive)"
+vvp "$SIM/sim_m18.vvp" +elf_hex="$SIM/veda_smoke_m18.hex"
+
+echo "==> Milestone 18: Compiling (veda_attr-sourced Length bounds enforcement, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m18neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m18_neg.sv"
+echo "==> Simulating (Milestone 18 negative)"
+vvp "$SIM/sim_m18neg.vvp" +elf_hex="$SIM/veda_smoke_m18_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

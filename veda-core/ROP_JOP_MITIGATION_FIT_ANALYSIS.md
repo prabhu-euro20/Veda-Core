@@ -62,15 +62,30 @@ distinct, real next step, not a free consequence of what already exists.
 Overselling this domain today, without that design step, would be exactly
 the kind of hallucinated claim this analysis is required to avoid.
 
-## Honest next step, if pursued
+## Update — this honest next step is now done, tested, and resolved
 
-Design a `csp`-equivalent convention for Veda-Core (which capability
-register is the protected stack pointer, how prologue/epilogue code uses
-it, whether this is opt-in per-function or a fixed ABI rule) — a real,
-scoped design task, analogous in size to the PCC compartment-bounding work
-already completed (Milestone 14), before any ROP/JOP mitigation claim for
-Veda-Core specifically could be tested the way the bounds-overflow claim
-already was.
+`STACK_FRAME_CALL_RETURN_ANALYSIS.md` does exactly the scoped design task
+named below, then goes further: builds and runs three real programs
+against the actual, unmodified, committed `veda_core.tlv` to test it, not
+just design it. Real result: a `csp`-equivalent convention built entirely
+from already-existing, already-verified instructions (`OCA`+`CSeal` to
+derive and seal a return-capability once per call from a long-lived
+stack-region capability, `OCL.C`+`CGetTag`+`CUnseal`+`CGetAddr` to verify
+and use it on return) **does stop the exact stack-smash hijack this
+document describes** — confirmed by reproducing the real attack against
+both the unprotected convention (`0xbad1`, hijacked) and the protected one
+(`0xca11`, caught). A genuinely new, heavier "Frame-object per call"
+design (using `ODT-Populate`/`Destroy` instead of the lighter
+`OCA`/`CSeal` derivation) was considered and rejected, grounded in this
+project's own iAPX 432 research and Milestone 16's new generation
+-retirement ceiling. One real, honest gap was also found by testing
+rather than assuming: the protection above is currently a software
+discipline (an explicit Tag check), not a hardware guarantee — a third
+test (`prot_gap`) proves omitting that check does not fail safely. Closing
+that gap needs one new, small, well-precedented instruction (a
+single-operand, hard-trapping sibling of `OCInvoke`, i.e. a real sentry
+-capability jump) — scoped but not yet built, see the full doc for why it
+was deliberately not implemented in the same pass as the design decision.
 
 ## Sources
 

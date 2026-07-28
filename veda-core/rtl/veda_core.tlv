@@ -643,6 +643,11 @@
          $csr_is_veda_pcc_length   = ($csr_addr == 12'h7C1);
          $csr_is_veda_mepcc_base   = ($csr_addr == 12'h7C2);
          $csr_is_veda_mepcc_length = ($csr_addr == 12'h7C3);
+         // RTL Milestone 18: reusable Length/Perms template for
+         // VEDA_ODT_POPULATE_FAST below -- same real 0x7C0-0x7FF custom
+         // range, next free slot after Milestone 14's four, matching the
+         // already-verified Sail-side choice (veda_regs.sail).
+         $csr_is_veda_attr         = ($csr_addr == 12'h7C4);
 
          // MRET: the one, fixed 32-bit encoding (funct12=0b001100000010,
          // rs1=rd=0, funct3=0, opcode=SYSTEM) -- matched as a single
@@ -910,6 +915,14 @@
          // right, full 5-bit GPR fields -- no new decode signal needed.
          $is_veda_odt_populate = $op_is_custom0 && ($funct3 == 3'b000) && ($funct7 == 7'b0000011);
          $is_veda_odt_destroy  = $op_is_custom0 && ($funct3 == 3'b001) && ($funct7 == 7'b0000011);
+         // RTL Milestone 18 (mirrors Sail's VEDA_ODT_POPULATE_FAST,
+         // veda_ocl_insts.sail): same funct3 as plain Populate (grouping
+         // with the Populate family), funct7 = 0000100 -- the next free
+         // Custom-0 slot, verified free by grepping every existing
+         // $is_veda_* decode condition in this file before choosing it.
+         // rs2 = Base directly (no packed descriptor); Length/Perms come
+         // from $veda_attr (defined further below), not from rs2.
+         $is_veda_odt_populate_fast = $op_is_custom0 && ($funct3 == 3'b000) && ($funct7 == 7'b0000100);
 
          $op_is_custom1   = ($opcode == 7'b0101011);
          // Op-select (funct7[31:27]) reuses real RISC-V Zaamo's own
@@ -1106,7 +1119,12 @@
          // _violation signal that already gates privilege, so it reuses
          // the established soft-no-op-on-violation write path with no
          // new plumbing.
-         $veda_odt_populate_violation = $is_veda_odt_populate && (!($priv || $veda_oda_authorized) || $veda_odt_retired);
+         // RTL Milestone 18: shares this same violation signal with
+         // VEDA_ODT_POPULATE_FAST (identical privilege/retired gate on
+         // both, mirroring Sail's own two execute clauses, which each
+         // repeat the identical check rather than sharing a helper).
+         $veda_odt_populate_violation = ($is_veda_odt_populate || $is_veda_odt_populate_fast) &&
+                                          (!($priv || $veda_oda_authorized) || $veda_odt_retired);
          $veda_odt_destroy_violation  = $is_veda_odt_destroy  && !($priv || $veda_oda_authorized);
 
          // Sail's own real rule: repopulating a still-valid slot bumps
@@ -1125,13 +1143,19 @@
                                     (($is_veda_odt_destroy || $veda_odt_valid) && ($veda_odt_gen == 8'hFF));
          // Populate: Base/Length/Perms come from rs2's packed descriptor
          // (Section 5.1: Base[31:0] in bits[63:32], Length[15:0] in
-         // bits[31:16], Perms[15:0] in bits[15:0]). Destroy: preserved
-         // unchanged from old_entry, matching Sail's own
-         // VEDA_ODT_DESTROY exactly (only valid/generation actually
-         // change).
-         $veda_odtpd_new_base[31:0]   = $is_veda_odt_populate ? $rs2_data[63:32] : $veda_odt_base;
-         $veda_odtpd_new_length[15:0] = $is_veda_odt_populate ? $rs2_data[31:16] : $veda_odt_length;
-         $veda_odtpd_new_perms[15:0]  = $is_veda_odt_populate ? $rs2_data[15:0]  : $veda_odt_perms;
+         // bits[31:16], Perms[15:0] in bits[15:0]). Populate-Fast (RTL
+         // Milestone 18): Base = rs2 directly (no packing -- the whole
+         // real point, a clean 2-instruction `la`/`li` suffices instead
+         // of a full 6-instruction `li`), Length/Perms = $veda_attr
+         // (defined further below). Destroy: preserved unchanged from
+         // old_entry, matching Sail's own VEDA_ODT_DESTROY exactly (only
+         // valid/generation actually change).
+         $veda_odtpd_new_base[31:0]   = $is_veda_odt_populate      ? $rs2_data[63:32] :
+                                          $is_veda_odt_populate_fast ? $rs2_data[31:0]  : $veda_odt_base;
+         $veda_odtpd_new_length[15:0] = $is_veda_odt_populate      ? $rs2_data[31:16] :
+                                          $is_veda_odt_populate_fast ? $veda_attr[31:16] : $veda_odt_length;
+         $veda_odtpd_new_perms[15:0]  = $is_veda_odt_populate      ? $rs2_data[15:0]  :
+                                          $is_veda_odt_populate_fast ? $veda_attr[15:0]  : $veda_odt_perms;
          // Only consumed by the trailing raw \SV always_ff block below
          // (invisible to SandPiper's own TLV-level dependency tracking,
          // same real reason $veda_ocs_value/$veda_nmc_add_result_d/
@@ -1732,6 +1756,74 @@
          $veda_ocinvoke_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
 
          // ─────────────────────────────────────────────────────────
+         //  OCJALR (Milestone 17, veda-core/STACK_FRAME_CALL_RETURN_
+         //  ANALYSIS.md): closes the real, honest software-discipline
+         //  gap that analysis found by testing rather than assuming --
+         //  a return-address convention built entirely from already-
+         //  existing instructions (OCA+CSeal at the call site, already
+         //  proven working) left the return side as a hand-rolled
+         //  CUnseal+CGetAddr+JALR sequence with no hardware gate: a
+         //  never-sealed or corrupted-to-unsealed capability's own
+         //  Base/Offset fields were still readable and jumpable, the
+         //  check that made it safe was purely a software habit.
+         //  OCJALR merges unseal-verification and jump into one atomic
+         //  instruction, so the check cannot be forgotten by
+         //  construction -- the same real property real CHERI's own
+         //  CJALR provides for its sentry-capability jumps (CHERI ISA
+         //  spec p.213, `CapEx_SealViolation` on a sealed-but-wrong
+         //  capability, full semantics read before writing this).
+         //  funct7 = 0010100, the next genuinely free Custom-2/
+         //  funct3=001 slot -- 0010011 was this instruction's own
+         //  first-draft value, found (on the Sail side, before any RTL
+         //  was written) to collide with OSpecialRW's already-existing
+         //  encoding, since OSpecialRW hardwires its own rs2-position
+         //  field to all-zero rather than treating it as a real
+         //  operand -- a real, narrow encoding bug caught and fixed
+         //  before it could reach RTL at all.
+         //  rs1 = cs1 (the sealed return-capability being verified and
+         //  jumped through, reusing $veda_rs1cap_*, the same rs1-cap
+         //  field position every Custom-2 instruction already shares);
+         //  rs2 = cs2 (the seal-authority, reusing $veda_cs2_*, the
+         //  same field CSeal/CUnseal/OCInvoke already established).
+         //  Check order mirrors veda_cap_insts.sail's own VEDA_OCJALR
+         //  exactly: Tag(cs1) -> Tag(cs2) -> Seal(cs1) must hold ->
+         //  Seal(cs2) must NOT hold -> Permit_Unseal(cs2) ->
+         //  cs2.Offset == cs1.otype (the same real type-authority match
+         //  CUnseal itself already checks) -> Permit_Execute(cs1).
+         //  Deliberately narrower than real CHERI's own general-purpose
+         //  CJALR (which also mints a new sentry-sealed return
+         //  capability as a side effect of every jump, via a dedicated
+         //  reserved otype): this instruction is scoped to exactly the
+         //  verify-and-consume half the vulnerability was in, reusing
+         //  Milestone 6's existing CSeal/CUnseal type-authority model
+         //  rather than inventing a second, parallel sealing mechanism.
+         // ─────────────────────────────────────────────────────────
+         $is_veda_ocjalr = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010100);
+         $veda_ocjalr_violation = $is_veda_ocjalr && (
+            !$veda_rs1cap_tag || !$veda_cs2_tag ||
+            !$veda_sealed || $veda_cs2_sealed ||
+            !$veda_cs2_perms[9] ||
+            ($veda_cs2_offset != $veda_rs1cap_otype) ||
+            !$veda_rs1cap_perms[1]);
+         $veda_ocjalr_cause[4:0] =
+            !$veda_rs1cap_tag                       ? 5'h02 :
+            !$veda_cs2_tag                          ? 5'h02 :
+            !$veda_sealed                           ? 5'h03 :
+            $veda_cs2_sealed                        ? 5'h03 :
+            !$veda_cs2_perms[9]                     ? 5'h03 :
+            ($veda_cs2_offset != $veda_rs1cap_otype) ? 5'h04 :
+                                                        5'h11; // remaining case: cs1 not executable
+         $veda_ocjalr_cap_idx[3:0] =
+            !$veda_rs1cap_tag                       ? $veda_ocl_ocs_rs1_cap :
+            !$veda_cs2_tag                          ? $veda_cseal_cunseal_rs2_cap :
+            !$veda_sealed                           ? $veda_ocl_ocs_rs1_cap :
+            $veda_cs2_sealed                        ? $veda_cseal_cunseal_rs2_cap :
+            !$veda_cs2_perms[9]                     ? $veda_cseal_cunseal_rs2_cap :
+            ($veda_cs2_offset != $veda_rs1cap_otype) ? $veda_ocl_ocs_rs1_cap :
+                                                        $veda_ocl_ocs_rs1_cap;
+         $veda_ocjalr_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+
+         // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 11: OSpecialRW + capability-authority-gated
          //  ODT-Populate/ODT-Destroy (NEXT_STEPS_ROADMAP.md §2.5).
          //  Mirrors veda_cap_insts.sail's own VEDA_OSPECIALRW field-for-
@@ -1952,6 +2044,7 @@
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
+                             $veda_ocjalr_violation ||
                              $veda_bind_trap || $veda_pcc_violation;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
@@ -1962,9 +2055,11 @@
             $veda_nmc_add_d_violation ? $veda_nmc_add_d_cause :
             $veda_atomic_violation    ? $veda_atomic_cause :
             $veda_ocinvoke_violation  ? $veda_ocinvoke_cause :
+            $veda_ocjalr_violation    ? $veda_ocjalr_cause :
             $veda_bind_trap           ? $veda_bind_cause :
                                         5'b0;
          $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation ? $veda_ocinvoke_cap_idx :
+                                    $veda_ocjalr_violation   ? $veda_ocjalr_cap_idx :
                                     $veda_bind_trap          ? $veda_rd_cap :
                                                                 $veda_ocl_ocs_rs1_cap;
 
@@ -1992,6 +2087,7 @@
                              $csr_is_veda_pcc_length   ? {48'b0, $veda_pcc_length} :
                              $csr_is_veda_mepcc_base   ? {32'b0, $veda_mepcc_base} :
                              $csr_is_veda_mepcc_length ? {48'b0, $veda_mepcc_length} :
+                             $csr_is_veda_attr         ? {32'b0, $veda_attr} :
                                               64'b0;
          // CSRRS with rs1=x0 must not write the CSR at all (real
          // RISC-V's own rule, VEDA_CORE... no -- the base Zicsr spec
@@ -2093,6 +2189,16 @@
                                      (>>1$veda_trap_taken) ? >>1$veda_pcc_length :
                                      (>>1$csr_write_en && >>1$csr_is_veda_mepcc_length) ? >>1$csr_wdata[15:0] :
                                                                                            >>1$veda_mepcc_length;
+         // RTL Milestone 18: plain read/write CSR, no other write source
+         // (unlike veda_pcc_base/length, which also get written by a
+         // successful OCInvoke/trap) -- mirrors $mtvec's own simple
+         // reset/CSRRW-only pattern exactly. Reset to 0 is harmless: an
+         // all-zero Length/Perms just makes the first Populate-Fast
+         // object real but permission-less until software actually sets
+         // this CSR, matching the Sail side's own identical reasoning.
+         $veda_attr[31:0] = $reset ? 32'b0 :
+                              (>>1$csr_write_en && >>1$csr_is_veda_attr) ? >>1$csr_wdata[31:0] :
+                                                                            >>1$veda_attr;
 
          // OCA is deliberately absent here -- its destination (rd) is a
          // Capability Register, not a GPR (VEDA_CORE_SPEC.md Section 1:
@@ -2123,6 +2229,7 @@
                       ($is_veda_atomic && !$veda_atomic_violation) ||
                       $is_veda_capquery ||
                       ($is_veda_odt_populate && !$veda_odt_populate_violation) ||
+                      ($is_veda_odt_populate_fast && !$veda_odt_populate_violation) ||
                       ($is_veda_odt_destroy  && !$veda_odt_destroy_violation) ||
                       // RTL Milestone 9: CSRRW/CSRRS always write rd
                       // with the CSR's OLD value, independent of
@@ -2241,12 +2348,18 @@
          // real CInvoke performs (CHERI ISA spec p.209's own
          // `nextPC = newPC` on the success path) -- not a two-
          // instruction unseal-then-JALR software sequence.
+         // RTL Milestone 17: OCJALR's own real jump, the same real
+         // unconditional-hardware-redirect shape OCInvoke's own jump
+         // above already established (a failing OCJALR is already
+         // routed to $veda_trap_taken, never reaches here).
          $pc_src = $veda_trap_taken || $is_mret ||
                    ($is_veda_ocinvoke && !$veda_ocinvoke_violation) ||
+                   ($is_veda_ocjalr && !$veda_ocjalr_violation) ||
                    $is_jal || $is_jalr || $branch_taken;
          $alt_pc[63:0] = $veda_trap_taken ? $mtvec :
                           $is_mret         ? $mepc :
                           ($is_veda_ocinvoke && !$veda_ocinvoke_violation) ? $veda_ocinvoke_target :
+                          ($is_veda_ocjalr && !$veda_ocjalr_violation) ? $veda_ocjalr_target :
                           $is_jal ? $jal_target : $is_jalr ? $jalr_target : $branch_target;
 
          // ─────────────────────────────────────────────────────────
@@ -2375,7 +2488,7 @@
             // exactly (VEDA_CORE_SPEC.md Section 5.1: "rd unused (written
             // 0 on success)"). Irrelevant when a violation suppresses the
             // write ($reg_write already gates that off above).
-            ($is_veda_odt_populate || $is_veda_odt_destroy) ? 64'b0 :
+            ($is_veda_odt_populate || $is_veda_odt_populate_fast || $is_veda_odt_destroy) ? 64'b0 :
             // RTL Milestone 9: rd = the CSR's value from BEFORE this
             // write (real CSRRW/CSRRS semantics) -- $csr_rdata is read
             // combinationally in the same cycle the write is computed,
@@ -2732,7 +2845,7 @@
    // Veda-Core instruction test in this project already runs under
    // +elf_hex/act4_mode anyway.
    always_ff @(posedge clk) begin
-      if (act4_mode && CPU_is_veda_odt_populate_a0 && !CPU_veda_odt_populate_violation_a0) begin
+      if (act4_mode && (CPU_is_veda_odt_populate_a0 || CPU_is_veda_odt_populate_fast_a0) && !CPU_veda_odt_populate_violation_a0) begin
          odt_mem[CPU_veda_odt_addr_a0+0] <= CPU_veda_odtpd_new_base_a0[7:0];
          odt_mem[CPU_veda_odt_addr_a0+1] <= CPU_veda_odtpd_new_base_a0[15:8];
          odt_mem[CPU_veda_odt_addr_a0+2] <= CPU_veda_odtpd_new_base_a0[23:16];
