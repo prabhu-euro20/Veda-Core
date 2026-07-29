@@ -87,3 +87,4 @@ toolchain/*/build/
 *.whl
 dist/
 node_modules/
+veda-core/security_trap_demo/
