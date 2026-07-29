@@ -1,4 +1,4 @@
-# Veda-Core — Object‑Centric + Capability-Based Address-Less RISC‑V Extension Core
+# Veda-Core -- Object‑Centric + Capability-Based Address-Less RISC‑V Extension Core
 
 This repository subproject implements Veda‑Core: an object‑centric,
 address‑less, capability‑based RISC‑V extension designed for deterministic
