@@ -43,3 +43,47 @@ veda-core/sail_tests/*.o
 # Python bytecode cache.
 __pycache__/
 *.pyc
+
+# Local virtualenvs
+**/.venv/
+act4-verify/.venv/
+
+# Editor and IDE
+.vscode/
+.idea/
+
+# Build outputs, logs and caches
+*/build/
+**/build/
+*.log
+*.tmp
+*.cache/
+.cache/
+.pytest_cache/
+
+# Compiled objects and archives
+*.o
+*.so
+*.a
+*.dSYM/
+
+# Large vendored toolchains and installed packages (do not push)
+toolchain/opam-root/
+toolchain/act4-bin/
+toolchain/opam-bin/
+toolchain/spike-install/
+toolchain/bundle-gems/
+toolchain/riscv-collab-gcc/
+toolchain/*/opam-root/
+
+# Other vendored or generated dependencies
+toolchain/
+verify/
+act4-verify/
+toolchain/*/build/
+
+# Misc
+*.egg-info/
+*.whl
+dist/
+node_modules/
