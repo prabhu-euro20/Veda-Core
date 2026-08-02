@@ -57,6 +57,21 @@ budgets and today's security threat landscape.
 See `veda-core/VEDA_CORE_SPEC.md` for the full architecture and
 `veda-core/TECHNICAL_BRIEF.md` for a guided walkthrough.
 
+## Micro Architecture Visualization
+
+
+
+https://github.com/user-attachments/assets/a46c9a61-ef68-4ae5-8912-edf02b897364
+
+
+## Compartmentalization Visualization
+
+
+
+https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
+
+
+
 ## Real measured results
 
 (from committed Sail + RTL simulations)
