@@ -1,29 +1,120 @@
-# Veda-Core — Object‑Centric Capability Extension for RISC‑V
+# Veda-Core — Object-Centric, Address-Less, Capability-Based RISC-V Extension
 
-This repository subproject implements Veda‑Core: an object‑centric,
-address‑less, capability‑based RISC‑V extension designed for deterministic
-hardware‑enforced compartmentalization and secure memory access.
+Veda-Core is a RISC-V processor extension that closes one of the oldest,
+most persistent security holes in computing: programs using raw memory
+addresses that can be guessed, forged, or reused after being freed. Instead of addresses, software
+works with `Object_ID`s that the hardware checks on every single memory
+access — enforcing **memory safety** automatically, and keeping different
+parts of a program isolated from each other in hardware
+(**compartmentalization**), deterministically, every time.
 
-Highlights
-- Object‑centric ISA: software holds `Object_ID`s; every memory access
-  is performed through a bound 128‑bit capability register and a flat,
-  system‑wide Object Descriptor Table (ODT).
-- Address‑less at the ISA level: no raw software addresses are used for
-  memory safety semantics.
-- Deterministic enforcement: checks are hardware‑local and designed to
-  minimize jitter (WCET focus).
+## What is Veda-Core
 
-Real measured results (from committed Sail + RTL simulations)
-- Deterministic tag checks: `P(bypass) = 0` (vs. Arm MTE's probabilistic tags).
-- OCInvoke (compartment crossing): `38 + 3N` cycles vs. software `1 + 9N`.
-- OCJALR (protected‑return‑jump): `7 cycles` vs. naive `10 cycles` (≈−30%).
-- Object‑descriptor construction (`POPULATE_FAST`): `6N+3` vs `10N` (−32.5% @ N=4).
-- Critical check chain shorter than plain loads: `95 vs 114` logic‑gate levels.
-- Fixed object‑bind overhead measured at `+10 cycles` (amortizes to <2% by N=64).
-- Five real attack demos where traditional RV64I fails silently and
-  see `EVIDENCE_INDEX.md`and `ATTACK_DEMO_PORTFOLIO.md` for reproduction notes and which runs were re-executed.
+Traditional processor architectures treat memory as flat bytes at raw
+addresses: a raw load/store instruction — `SD` on RISC-V, `MOV [addr], reg`
+on x86, `STR` on Arm — has no bounds check, no tag check, no
+use-after-free detection built into the instruction itself, on any
+mainstream architecture's own base ISA. Veda-Core replaces that contract
+at the ISA level, built on five design pillars:
 
-Verification status
+- **Object-centric**: memory is not "bytes at addresses," it is Objects.
+  Software holds an `Object_ID`, never a raw address, for memory-safety
+  purposes.
+- **Address-less**: no raw software address is used in ISA/ABI-visible
+  memory-safety semantics — software works only with an `Object_ID` and a
+  relative `Offset`. Because of that, an object can physically move in
+  memory (`Rebind`) without software changing a single bit: RTL
+  Milestone 8 relocated a real object to a new physical address, and the
+  capability register's own untouched `Offset` correctly followed it
+  there on the very next access (`veda-core/rtl/MILESTONE_8_RESULTS.md`).
+- **Capability-based**: software's `Object_ID` is looked up in a flat,
+  system-wide Object Descriptor Table (ODT) — hardware's own directory of
+  every object's location and size — and loaded into a 128-bit capability
+  register: a tamper-proof access pass combining where the object is
+  (`Base`), how big it is (`Length`), where within it the program is
+  currently pointing (`Offset`), a hidden validity marker (`Tag`), and a
+  version number that catches stale references (generation counter). Like
+  a key only a locksmith can cut, a capability can only be produced by
+  real, authorized hardware operations (`Object-Bind`, `OCA` [Object
+  Capability Adjust], ...) — software can never fabricate one by writing
+  arbitrary bits into the register (see the arbitrary-pointer-forgery
+  result below).
+- **Deterministic**: every access is checked in hardware, every time, with
+  zero software-visible probability of bypass (`P(bypass) = 0` — not just
+  rare, it cannot happen at all — vs. Arm MTE's probabilistic tag
+  matching, where a narrow 4-bit tag can coincidentally collide).
+- **Single, global object namespace**: the ODT is one flat, system-wide
+  table, not partitioned per process — an `Object_ID` means the same thing
+  everywhere in the system.
+
+None of this is a brand-new idea invented from scratch — flat, system-wide,
+ID-indexed capability tables were explored by real 1970s-80s hardware (the
+Plessey System 250, the Cambridge CAP computer) before the field moved on,
+for throughput and cost reasons specific to that era. Veda-Core is a
+deliberate revival of that design branch, built for today's transistor
+budgets and today's security threat landscape.
+
+See `veda-core/VEDA_CORE_SPEC.md` for the full architecture and
+`veda-core/TECHNICAL_BRIEF.md` for a guided walkthrough.
+
+## Real measured results
+
+(from committed Sail + RTL simulations)
+- Deterministic tag checks: `P(bypass) = 0` (vs. Arm MTE's probabilistic
+  tags) — see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
+- OCInvoke (compartment crossing): `38 + 3N` cycles vs. software `1 + 9N`,
+  where `N` is the number of crossings — Veda-Core pays a larger one-time
+  setup cost (38) but a 3x cheaper cost per crossing (3 vs 9), winning
+  outright past N≈6 — see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
+- OCJALR (protected-return-jump): `7 cycles` vs. naive `10 cycles`
+  (≈−30%) — "naive" means hand-writing the check as 4 separate
+  instructions (`CGetTag`+`beqz`+`CUnseal`+`CGetAddr`), which a
+  programmer can forget to include; `OCJALR` collapses all of it into
+  one atomic, hardware-enforced instruction — see
+  `veda-core/rtl/MILESTONE_17_RESULTS.md`.
+- Object-descriptor construction (`POPULATE_FAST`): `6N+3` vs `10N`
+  (−32.5% @ N=4) — here `N` is the number of objects populated from the
+  same Length/Permissions template; the old way rebuilds a packed 64-bit
+  descriptor per object (10 instructions), `POPULATE_FAST` sets
+  Length/Perms once in a CSR and only loads Base fresh per object (6
+  instructions) — see `veda-core/rtl/MILESTONE_18_RESULTS.md`.
+- Critical check chain shorter than plain loads: `95 vs 114` logic-gate
+  levels — a gate-level synthesis measurement of the longest
+  combinational path (Yosys), not cycle count. Despite running 5
+  security checks (Tag, staleness, Seal, Permission, Bounds), Veda-Core's
+  `OCL.D` path is shorter because the checks run in parallel with the
+  address computation, not in series before it — see
+  `veda-core/SYNTHESIS_CRITICAL_PATH_STUDY.md`.
+- Fixed object-bind overhead measured at `+10 cycles` (amortizes to <2%
+  by N=64) — see `veda-core/OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`.
+- Five real attack-demo classes, each run on both traditional RV64I and
+  Veda-Core in real Icarus Verilog simulation, real register/trap values
+  read directly from the run, not theoretical:
+  - **Out-of-bounds read**: secret value leaked into a GPR vs. blocked
+    (`mcause=0x18`, Bounds Violation).
+  - **Out-of-bounds write**: an adjacent canary corrupted vs. untouched.
+  - **Stack-smashing / return-address hijack**: control flow fully
+    attacker-hijacked vs. caught structurally by `OCJALR` — and ~30%
+    *cheaper* than a naive software-checked equivalent (7 vs. 10 cycles).
+  - **Use-after-free**: a stale reference silently returns a reused
+    object's data (traditional "free" is a software-only convention,
+    hardware doesn't know) vs. a generation-counter Tag Violation trap
+    (Veda-Core's `ODT-Destroy` bumps a real generation counter; a stale
+    capability's old generation no longer matches).
+  - **Arbitrary-pointer forgery**: a hand-crafted bit pattern used as a
+    pointer succeeds unconditionally on traditional hardware (the most
+    powerful exploitation primitive — arbitrary read/write) vs.
+    `CGetTag = 0` and a hard trap (an ordinary store can write the bits,
+    but never the out-of-band Tag — only real hardware mint operations
+    can).
+
+  See `veda-core/ATTACK_DEMO_PORTFOLIO.md` for the exact register/trap
+  values per demo and `veda-core/EVIDENCE_INDEX.md` for the verification
+  ledger (which claims were re-run this session vs. file-committed vs.
+  externally cited) — note demos #4/#5 are session-scoped test programs,
+  not yet part of the permanent, committed regression corpus.
+
+## Verification status
 - Sail formal model: 30/30 self‑checking tests (re-run during this audit;
   see `EVIDENCE_INDEX.md` for the exact commands and outputs).
 - RTL implementation (TL‑Verilog → SystemVerilog): milestone
@@ -31,7 +122,7 @@ Verification status
 - RISC‑V ACT4 RV64I conformance: 51/51, zero regressions (run
   directly against `veda_core.tlv`; see `veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`).
 
-Where to find the authoritative docs and evidence
+## Where to find the authoritative docs and evidence
 - Technical brief: `veda-core/TECHNICAL_BRIEF.md`
 - Architecture spec: `veda-core/VEDA_CORE_SPEC.md`
 - Benchmarks: `veda-core/OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`
@@ -42,14 +133,14 @@ Where to find the authoritative docs and evidence
 - Milestone results (Sail + RTL): `veda-core/MILESTONE_V-A_RESULTS.md`, `veda-core/MILESTONE_V-B_RESULTS.md`, `veda-core/MILESTONE_14_RESULTS.md`, `veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`
  
 
-Quick reproduction notes
+## Quick reproduction notes
 - The RTL and Sail models are in `veda-core/rtl/` and `toolchain/sail-riscv/`.
 - Primary reproduction scripts live under `veda-core/` and
    `veda-core/rtl/` (for example `verification.sh`, `rtl/run_act4_tests.sh`).
 - Results reported above come from Icarus Verilog simulations and the
    Sail executable model; no FPGA/ASIC is claimed.
 
-Limitations & honest caveats
+## Limitations & honest caveats
 - All hardware results are from RTL simulation or Sail execution; there
   is no silicon or FPGA bitstream in this repo yet.
 - Energy overhead is real (≈+20% dynamic toggle proxy); see
@@ -95,10 +186,7 @@ component's real build output before redoing multi-minute work, never a
 separate bookkeeping file that could go stale) and supports `--dry-run`
 to preview, `--force` to rebuild, and individual named targets
 (`./toolchain/setup.sh --help` lists them: `deps`, `gnu-toolchain`,
-`sail-riscv`, `llvm`, `demo`, `debug`). This follows the real
-architectural approach of CHERI's own `cheribuild.py`
-(github.com/CTSRD-CHERI/cheribuild) — not its content — sized for this
-project's own current, much smaller scope.
+`sail-riscv`, `llvm`, `demo`, `debug`).
 
 ### What each step does, if you want to run them by hand
 
