@@ -187,7 +187,7 @@ Total: 23(Object_ID)+32(Base)+16(Length)+16(Offset)+16(Perms)+16(otype)+8(Reserv
 | `0x04` | Type Violation | **Active** — fires on `OCInvoke`'s own `cs1.otype != cs2.otype` check (Section 1), the direct Veda-Core equivalent of CHERI's identical `CInvoke` check. |
 | `0x05` | **Object Not Found** (`Object_ID` has no valid ODT entry) | **Active** — Veda-Core-specific, no CHERI equivalent |
 | `0x06` | Owner Violation (`Object-Bind` against a live object owned by a different hart) | **Active** — Veda-Core-specific, no CHERI equivalent (Section 4.1, Milestone 12). |
-| `0x07` | reserved | — |
+| `0x07` | Purecap Violation (an ordinary, non-Veda LOAD/STORE/AMO/etc. attempted while `veda_mode.veda_purecap` is set, or while executing inside a live `OCInvoke`-entered compartment) | **Active** — Veda-Core-specific, closes the real gap where `CGetBase` legitimately exposes a raw address into a GPR but nothing previously stopped that GPR from then being used as an ordinary memory-access base with zero capability check (Milestone 19). Same real property real CHERI's own "hybrid mode" has; this is Veda-Core's own equivalent of a "purecap mode" to close it. `cap_idx = 17` (`0b10001`), a sentinel outside the real 0-15 capability-register range, the same convention `0x01`'s own PCC-fetch reuse (`cap_idx = 16`) already established. |
 | `0x08` | Software-Defined Permission Violation | Reserved slot, kept available |
 | `0x09`–`0x0f` | reserved | — |
 | `0x10` | GLOBAL Violation | **Active** |
