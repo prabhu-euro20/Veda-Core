@@ -187,6 +187,41 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m18neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_
 echo "==> Simulating (Milestone 18 negative)"
 vvp "$SIM/sim_m18neg.vvp" +elf_hex="$SIM/veda_smoke_m18_neg.hex"
 
+echo "==> Milestone 19: Compiling (Veda-Purecap Enforcement, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m19.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m19.sv"
+echo "==> Simulating (Milestone 19 positive)"
+vvp "$SIM/sim_m19.vvp" +elf_hex="$SIM/veda_smoke_m19.hex"
+
+echo "==> Milestone 19: Compiling (global purecap bit blocks ordinary ld/sd, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m19neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m19_neg.sv"
+echo "==> Simulating (Milestone 19 negative 1)"
+vvp "$SIM/sim_m19neg.vvp" +elf_hex="$SIM/veda_smoke_m19_neg.hex"
+
+echo "==> Milestone 19: Compiling (OCInvoke compartment blocks ordinary ld/sd, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m19neg2.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m19_neg2.sv"
+echo "==> Simulating (Milestone 19 negative 2)"
+vvp "$SIM/sim_m19neg2.vvp" +elf_hex="$SIM/veda_smoke_m19_neg2.hex"
+
+echo "==> Milestone 20: Compiling (compartment-state CSR gate, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m20.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m20.sv"
+echo "==> Simulating (Milestone 20 positive)"
+vvp "$SIM/sim_m20.vvp" +elf_hex="$SIM/veda_smoke_m20.hex"
+
+echo "==> Milestone 20: Compiling (veda_pcc_length self-escape, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m20neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m20_neg.sv"
+echo "==> Simulating (Milestone 20 negative 1)"
+vvp "$SIM/sim_m20neg.vvp" +elf_hex="$SIM/veda_smoke_m20_neg.hex"
+
+echo "==> Milestone 20: Compiling (veda_mode self-escape, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m20neg2.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m20_neg2.sv"
+echo "==> Simulating (Milestone 20 negative 2)"
+vvp "$SIM/sim_m20neg2.vvp" +elf_hex="$SIM/veda_smoke_m20_neg2.hex"
+
+echo "==> Compiling (Veda-Atomic aq/rl invariance)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_aqrl.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_aqrl_invariance.sv"
+echo "==> Simulating (aq/rl invariance)"
+vvp "$SIM/sim_aqrl.vvp" +elf_hex="$SIM/veda_smoke_aqrl_invariance.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

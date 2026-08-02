@@ -648,6 +648,14 @@
          // range, next free slot after Milestone 14's four, matching the
          // already-verified Sail-side choice (veda_regs.sail).
          $csr_is_veda_attr         = ($csr_addr == 12'h7C4);
+         // RTL Milestone 19 (Sail mirror, MILESTONE_19_RESULTS.md /
+         // veda-core/rtl/MILESTONE_19_RESULTS.md): veda_mode, bit 0 =
+         // veda_purecap. Next free slot after Milestone 18's 0x7C4,
+         // matching the already-verified Sail-side choice
+         // (veda_regs.sail) -- confirmed collision-free against every
+         // $csr_is_veda_* address already decoded above before adopting
+         // it.
+         $csr_is_veda_mode         = ($csr_addr == 12'h7C5);
 
          // MRET: the one, fixed 32-bit encoding (funct12=0b001100000010,
          // rs1=rd=0, funct3=0, opcode=SYSTEM) -- matched as a single
@@ -932,10 +940,26 @@
          // encoding wherever the concept transfers directly, not invent
          // new bit values (the same reasoning already applied when this
          // same op-select table was built once already in Sail
-         // Milestone V-B). aq/rl (funct7[26:25]) are decoded but not
-         // acted on -- this core is single-hart with no real memory-
-         // ordering concept to enforce yet, the identical real reason
-         // already stated for the Sail model.
+         // Milestone V-B). aq/rl (funct7[26:25]) are real, named signals
+         // below, matching Sail's own identical decoded-but-unused
+         // treatment (veda_atomic_insts.sail's own `_aq`/`_rl`
+         // underscore-prefixed parameters) -- fixed this security-audit
+         // pass: an earlier version of this comment claimed they were
+         // "decoded" when no RTL signal here actually captured them at
+         // all, a real documentation/code mismatch caught by direct
+         // inspection, not assumed correct from the comment alone. Left
+         // unused deliberately -- this core is genuinely single-hart,
+         // in-order, with no reordering of memory operations relative
+         // to program order ever possible, so aq/rl are trivially
+         // satisfied regardless of their value (RVWMO reduces to
+         // program order on one hart), not a silently-ignored real
+         // ordering requirement. See ATOMIC_AQRL_SAFETY_ANALYSIS.md for
+         // the full reasoning and the explicit, load-bearing warning for
+         // whoever eventually builds real multi-hart RTL.
+         $veda_atomic_aq = $instr[26];
+         $veda_atomic_rl = $instr[25];
+         `BOGUS_USE($veda_atomic_aq)
+         `BOGUS_USE($veda_atomic_rl)
          $veda_atomic_op[4:0] = $instr[31:27];
          // Width scoped to D (64-bit) only this milestone, matching the
          // established D-only precedent already used for OCL.D/OCS.D and
@@ -2040,12 +2064,38 @@
          // choice already made on the Sail side (veda_bind_insts.sail's
          // veda_trap() vs. the PCC hook's own direct handle_exception()
          // call).
+         // RTL Milestone 19 addition: $veda_purecap_violation joins the
+         // same combined trap-taken family -- its own cap_idx (17, the
+         // "this was purecap enforcement, not a real capability register"
+         // sentinel -- the next free value after PCC's own 16) and cause
+         // (0x07, VEDA_CORE_SPEC.md's previously-reserved slot, matching
+         // the Sail side) are both fixed constants, built directly into
+         // $mtval's own construction below, the identical "built inline,
+         // not through the typed interface" choice PCC's own cap_idx=16
+         // already established (see that comment above) -- 17 doesn't fit
+         // $veda_trap_cap_idx[3:0] (4 bits, max 15) either.
+         // RTL Milestone 20 addition: $veda_csr_escape_violation joins
+         // the same combined trap-taken family -- it needs no special
+         // cap_idx/cause handling of its own beyond $mcause's own
+         // mcause=0x02 special-case below (see that comment), because
+         // the existing, uniform "any trap resets veda_pcc_base/_length
+         // to unbounded, saving the pre-trap bounds into
+         // veda_mepcc_base/_length" priority (already the highest
+         // -priority branch in each of those four CSRs' own definitions)
+         // already correctly prevents the attacker-controlled csr_wdata
+         // from ever landing, for free, with no extra per-CSR guard
+         // needed -- confirmed by direct inspection before relying on
+         // it. veda_mode (0x7C5) has no such pre-existing trap-reset
+         // branch of its own (unlike the PCC-family CSRs, nothing else
+         // ever writes it), so its own write-gating expression below
+         // gets an explicit, separate guard instead.
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
                              $veda_ocjalr_violation ||
-                             $veda_bind_trap || $veda_pcc_violation;
+                             $veda_bind_trap || $veda_pcc_violation ||
+                             $veda_purecap_violation || $veda_csr_escape_violation;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
             $veda_ocs_violation       ? $veda_ocs_cause :
@@ -2088,6 +2138,7 @@
                              $csr_is_veda_mepcc_base   ? {32'b0, $veda_mepcc_base} :
                              $csr_is_veda_mepcc_length ? {48'b0, $veda_mepcc_length} :
                              $csr_is_veda_attr         ? {32'b0, $veda_attr} :
+                             $csr_is_veda_mode         ? {32'b0, $veda_mode} :
                                               64'b0;
          // CSRRS with rs1=x0 must not write the CSR at all (real
          // RISC-V's own rule, VEDA_CORE... no -- the base Zicsr spec
@@ -2099,6 +2150,25 @@
                              $is_csrrs ? ($csr_rdata | $rs1_data) :
                                          64'b0;
          $csr_write_en = $is_csr_access && !($is_csrrs && ($rs1 == 5'b0));
+         // RTL MILESTONE 20 (Sail mirror, MILESTONE_20_RESULTS.md): the
+         // real, empirically-confirmed compartment-state CSR
+         // self-escape -- code entered via a real OCInvoke could simply
+         // CSRRW its own compartment-state CSRs (veda_pcc_base/_length,
+         // veda_mepcc_base/_length, veda_mode) to undo its own bounding,
+         // zero trap. A write to any of these five while a compartment
+         // is live (veda_pcc_length != UNBOUNDED) is now illegal --
+         // matches the Sail side's own real-CHERI-grounded rule
+         // ("Reading or writing any CSR requires the
+         // Access_System_Registers permission on the PCC"). Read access
+         // is deliberately NOT gated (capability metadata is always
+         // inspectable, the same principle CGetTag/CGetType already
+         // rely on -- code inside a compartment already knows its own
+         // bounds, it got there via the capability that defined them).
+         $veda_csr_escape_violation = $csr_write_en &&
+            ($csr_is_veda_pcc_base || $csr_is_veda_pcc_length ||
+             $csr_is_veda_mepcc_base || $csr_is_veda_mepcc_length ||
+             $csr_is_veda_mode) &&
+            ($veda_pcc_length != 16'hFFFF);
          `BOGUS_USE($csr_rdata)
          `BOGUS_USE($csr_wdata)
 
@@ -2128,7 +2198,17 @@
                          // in mtval below, matching Sail's own
                          // make_sync_exception(E_Extension(()), xtval)
                          // shape exactly.
-                         (>>1$veda_trap_taken) ? 64'h18 :
+                         // RTL Milestone 20: a compartment-state CSR
+                         // self-escape attempt is a real, standard
+                         // RISC-V Illegal_Instruction (mcause=0x02), NOT
+                         // Veda-Core's own E_Extension (0x18) every
+                         // other family here shares -- matches the Sail
+                         // side's own real, idiomatic write_CSR
+                         // Err(())=>Illegal_Instruction() mechanism
+                         // exactly (a stronger, more consistent response
+                         // than a silent no-op, per that milestone's own
+                         // reasoning).
+                         (>>1$veda_trap_taken) ? (>>1$veda_csr_escape_violation ? 64'h02 : 64'h18) :
                                                   >>1$mcause;
          $mtval[63:0] = $reset ? 64'b0 :
                         // veda_xtval(cap_idx, cause) = zero_extend(cap_idx5
@@ -2142,7 +2222,28 @@
                         // cause=5'b00001) rather than going through
                         // $veda_trap_cap_idx[3:0]/$veda_trap_cause[4:0]
                         // (see $veda_trap_taken's own comment above).
-                        (>>1$veda_trap_taken) ? (>>1$veda_pcc_violation ? {54'b0, 5'b10000, 5'b00001}
+                        // RTL Milestone 19: the purecap-violation case is
+                        // special-cased identically (cap_idx=5'b10001=17,
+                        // cause=5'b00111=0x07) -- checked ahead of the PCC
+                        // case in this ternary chain, but the two can
+                        // never actually co-occur on the same cycle
+                        // ($veda_pcc_violation only ever fires from the
+                        // fetch-time check, which forces $instr to a NOP
+                        // before decode, so $is_load/$is_store -- and
+                        // therefore $veda_purecap_violation -- can never
+                        // also be true that same cycle), so the ordering
+                        // here is a don't-care, not a real priority
+                        // decision.
+                        // RTL Milestone 20: mtval for the mcause=0x02
+                        // case above holds the real, standard RISC-V
+                        // convention for an illegal-instruction trap --
+                        // the raw faulting instruction bits (the
+                        // offending CSRRW/CSRRS itself) -- rather than a
+                        // cap_idx/cause pair, since this is not a
+                        // Veda-specific violation family at all.
+                        (>>1$veda_trap_taken) ? (>>1$veda_csr_escape_violation ? {32'b0, >>1$instr}
+                                                  : >>1$veda_purecap_violation ? {54'b0, 5'b10001, 5'b00111}
+                                                  : >>1$veda_pcc_violation ? {54'b0, 5'b10000, 5'b00001}
                                                                          : {55'b0, >>1$veda_trap_cap_idx, >>1$veda_trap_cause}) :
                                                  >>1$mtval;
 
@@ -2199,6 +2300,22 @@
          $veda_attr[31:0] = $reset ? 32'b0 :
                               (>>1$csr_write_en && >>1$csr_is_veda_attr) ? >>1$csr_wdata[31:0] :
                                                                             >>1$veda_attr;
+         // RTL Milestone 19: veda_mode, bit 0 = veda_purecap. Identical
+         // simple reset/CSRRW-only pattern as veda_attr directly above --
+         // reset to 0 is the real correctness requirement here (not just
+         // styling): purecap defaults OFF, so the entire pre-existing
+         // 27-test RTL corpus and the 51/51 ACT4 conformance suite, none
+         // of which anticipate this feature, see zero behavior change
+         // until software explicitly opts in.
+         // RTL Milestone 20: !(>>1$veda_csr_escape_violation) added --
+         // unlike veda_pcc_base/_length/_mepcc_*, nothing else ever
+         // writes veda_mode, so there is no pre-existing higher-priority
+         // trap-reset branch to fall back on here; this guard is the
+         // only thing preventing an attacker's csr_wdata from landing
+         // while a compartment is live.
+         $veda_mode[31:0] = $reset ? 32'b0 :
+                              (>>1$csr_write_en && >>1$csr_is_veda_mode && !(>>1$veda_csr_escape_violation)) ? >>1$csr_wdata[31:0] :
+                                                                            >>1$veda_mode;
 
          // OCA is deliberately absent here -- its destination (rd) is a
          // Capability Register, not a GPR (VEDA_CORE_SPEC.md Section 1:
@@ -2221,7 +2338,15 @@
          // register write at all. OSpecialRW (Milestone 11) is absent
          // for the identical reason as OCA/CSetBounds/CSeal/CUnseal --
          // its `cd` is a Capability Register, not a GPR.
-         $reg_write = $is_load || $is_alu_imm || $is_alu_reg || $is_lui || $is_auipc ||
+         // RTL Milestone 19: $is_load's own term gains
+         // !$veda_purecap_violation -- an ordinary load blocked by
+         // purecap enforcement must not write $rd with load data (the
+         // memory access itself is also suppressed below, at /dmem's
+         // read is unaffected since RAM reads have no side effect to
+         // block, but the *write-back* of that data into a GPR is the
+         // real thing that must never happen on a violation, matching
+         // every other family's own $reg_write gating in this list).
+         $reg_write = ($is_load && !$veda_purecap_violation) || $is_alu_imm || $is_alu_reg || $is_lui || $is_auipc ||
                       $is_jal || $is_jalr || $is_alu_immw || $is_alu_regw ||
                       ($is_veda_ocl && !$veda_violation) ||
                       ($is_veda_nmc_add_w && !$veda_nmc_add_w_violation) ||
@@ -2372,6 +2497,25 @@
          $mem_addr[63:0]     = $rs1_data + ($is_store ? $imm_s : $imm_i);
          $mem_word_idx[5:0]  = $mem_addr[8:3];
          $mem_byte_off[2:0]  = $mem_addr[2:0];
+         // RTL MILESTONE 19 (Sail mirror): Veda-Purecap Enforcement --
+         // closes the real CGetBase-then-ordinary-load/store bypass
+         // (`cgetbase x1,c2` then a plain `ld`/`sd` through x1 completely
+         // skips every Veda-Core check). An ordinary base-ISA load/store
+         // traps if EITHER veda_mode's own purecap bit is set (a global
+         // "no ordinary load/store anywhere" switch) OR the live
+         // compartment is narrowed away from VEDA_PCC_UNBOUNDED (code
+         // entered via a successful OCInvoke can otherwise still read/
+         // write memory directly, undermining the isolation OCInvoke/PCC
+         // -bounding is meant to provide) -- both trigger conditions
+         // verified directly against MILESTONE_19_RESULTS.md's own Sail
+         // design before writing this. Deliberately does NOT touch any
+         // Veda-Core instruction's own memory path ($veda_ocl_load_data,
+         // OCS.D's write, etc.) -- those already go through their own,
+         // separate capability checks entirely (veda_check_access), zero
+         // shared code path by construction, matching the Sail side's own
+         // "never interferes with a legitimate Veda access" guarantee.
+         $veda_purecap_violation = ($is_load || $is_store) &&
+                                    ($veda_mode[0] || ($veda_pcc_length != 16'hFFFF));
          // VEDA-CORE RTL MILESTONE 7: base ISA stores can land inside the
          // same real elfmem[] region Veda-Core objects live in (in
          // act4_mode) -- must clear that granule's tag too (see the byte-
@@ -2466,7 +2610,13 @@
          $dmem_new_word[63:0]  = ($mem_cur_word & ~$store_mask) | $store_data_sh;
 
          /dmem[63:0]
+            // RTL Milestone 19: !(|cpu>>1$veda_purecap_violation) added,
+            // matching the real elfmem write block's own identical gate
+            // below -- kept consistent even though every real milestone
+            // test exercises the elfmem (act4_mode) path, not this
+            // Milestone A/B-era ROM-testing one.
             $wr_en = |cpu>>1$is_store &&
+                     !(|cpu>>1$veda_purecap_violation) &&
                      (|cpu>>1$mem_word_idx == #dmem);
             $val[63:0] = (|cpu$reset || |cpu>>1$reset) ? 64'b0 :
                          $wr_en ? |cpu>>1$dmem_new_word :
@@ -2710,7 +2860,13 @@
    // next clock edge), matching how /dmem's own $wr_en/$val TLV idiom
    // already behaves.
    always_ff @(posedge clk) begin
-      if (act4_mode && CPU_is_store_a0) begin
+      // RTL Milestone 19: !CPU_veda_purecap_violation_a0 added -- an
+      // ordinary base-ISA store blocked by purecap enforcement must not
+      // write elfmem at all (the real, previously-open bypass this
+      // milestone closes: a raw address extracted via cgetbase followed
+      // by a plain sd used to reach this exact write, completely
+      // unchecked).
+      if (act4_mode && CPU_is_store_a0 && !CPU_veda_purecap_violation_a0) begin
          if (CPU_is_sb_a0) begin
             elfmem[CPU_mem_addr_a0[31:0]+0] <= CPU_rs2_data_a0[7:0];
          end else if (CPU_is_sh_a0) begin
