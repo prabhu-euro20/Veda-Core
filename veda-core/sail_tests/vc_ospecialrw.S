@@ -17,19 +17,19 @@ _start:
     # instruction until this milestone).
     li   x1, 40
     li   x2, 0x8001100000400080
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 40
-    .word 0x0000d08b        # veda.bind c1, x1   -- the authority capability, unsealed
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1   -- the authority capability, unsealed
 
     # -- OSpecialRW's own atomic read-then-write, exercised twice to
     #    prove both halves independently. --
-    .word 0x2600915b         # ospecialrw c2, c1  -- c2 = ODA's OLD value (expect Tag=0, never set before); ODA := c1
-    .word 0x0601055b          # cgettag x10, c2    -- expect 0 (the old, empty ODA)
+    .insn r 0x5b, 0x1, 0x13, x2, x1, x0  # ospecialrw c2, c1  -- c2 = ODA's OLD value (expect Tag=0, never set before); ODA := c1
+    .insn r 0x5b, 0x0, 0x03, x10, x2, x0  # cgettag x10, c2    -- expect 0 (the old, empty ODA)
 
-    .word 0x260091db          # ospecialrw c3, c1  -- c3 = ODA's OLD value (now c1, from the write just above); ODA := c1 again
-    .word 0x060185db           # cgettag  x11, c3   -- expect 1 (the ODA really was populated by the first call)
-    .word 0x0001865b            # cgetbase x12, c3   -- expect 0x80011000 (c1's own real Base -- confirms it's genuinely c1's contents round-tripped through the ODA, not a coincidence)
+    .insn r 0x5b, 0x1, 0x13, x3, x1, x0  # ospecialrw c3, c1  -- c3 = ODA's OLD value (now c1, from the write just above); ODA := c1 again
+    .insn r 0x5b, 0x0, 0x03, x11, x3, x0  # cgettag  x11, c3   -- expect 1 (the ODA really was populated by the first call)
+    .insn r 0x5b, 0x0, 0x00, x12, x3, x0  # cgetbase x12, c3   -- expect 0x80011000 (c1's own real Base -- confirms it's genuinely c1's contents round-tripped through the ODA, not a coincidence)
 
     # -- ODT-Populate still succeeds with the ODA now genuinely
     #    authorized (in addition to this test's own ordinary M-mode
@@ -41,12 +41,12 @@ _start:
     #    privilege gating already covered by earlier milestones). --
     li   x1, 41
     li   x2, 0x8001200000400300
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 41
-    .word 0x0000d20b         # veda.bind c4, x1
-    .word 0x060206db          # cgettag  x13, c4   -- expect 1
-    .word 0x0002075b           # cgetbase x14, c4   -- expect 0x80012000
+    .insn i 0x0b, 0x5, x4, x1, 0  # veda.bind c4, x1
+    .insn r 0x5b, 0x0, 0x03, x13, x4, x0  # cgettag  x13, c4   -- expect 1
+    .insn r 0x5b, 0x0, 0x00, x14, x4, x0  # cgetbase x14, c4   -- expect 0x80012000
 
     li   t0, 0
     bne  x10, t0, fail

@@ -29,15 +29,15 @@ _start:
 
     li   x1, 60
     li   x2, 0x80010500     # Base, direct -- no <<32 packing needed, unlike plain Populate
-    .word 0x0820800b        # veda.odt.populate.fast x0, x1, x2
-    .word 0x0000d00b        # veda.bind c0, x1
+    .insn r 0x0b, 0x0, 0x04, x0, x1, x2  # veda.odt.populate.fast x0, x1, x2
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
 
     # Ordinary-position round trip (offset 0): proves Base/Perms correct.
     li   x3, 0
     li   x4, 0x55
-    .word 0x0230320b        # ocs.d c0, x3, x4
+    .insn r 0x0b, 0x3, 0x01, x4, x0, x3  # ocs.d c0, x3, x4
     li   x5, 0
-    .word 0x0030328b        # ocl.d x5, x3, c0
+    .insn r 0x0b, 0x3, 0x00, x5, x0, x3  # ocl.d x5, x3, c0
     li   x20, 0x55
     bne  x5, x20, self_check_fail
 
@@ -46,9 +46,9 @@ _start:
     # (0x40), not some other stale/default value that would trap here.
     li   x6, 0x38
     li   x7, 0x66
-    .word 0x0260338b        # ocs.d c0, x6, x7
+    .insn r 0x0b, 0x3, 0x01, x7, x0, x6  # ocs.d c0, x6, x7
     li   x8, 0
-    .word 0x0060340b        # ocl.d x8, x6, c0
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x6  # ocl.d x8, x6, c0
     li   x20, 0x66
     bne  x8, x20, self_check_fail
 

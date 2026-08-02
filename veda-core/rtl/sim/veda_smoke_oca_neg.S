@@ -16,12 +16,12 @@ _start:
     csrw mtvec, t0
 
     li   x1, 1          # Object_ID = 1 (Length=0x40)
-    .word 0x0000d00b    # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x2, 0x100        # delta, way beyond c0.Length=0x40 -- out of range
-    .word 0x142010db       # oca c1, c0, x2  (out of range -> c1.Tag cleared, soft-fail, no trap)
+    .insn r 0x5b, 0x1, 0x0a, x1, x0, x2  # oca c1, c0, x2  (out of range -> c1.Tag cleared, soft-fail, no trap)
     li   x4, 0x23             # value operand (irrelevant, should never be used)
     li   x5, 0x5555             # sentinel: must stay unchanged if NMC_ADD is correctly blocked
-    .word 0x0440b28b               # nmc_add.d x5, c1, x4 -- c1.Tag is false, must be a violation
+    .insn r 0x0b, 0x3, 0x02, x5, x1, x4  # nmc_add.d x5, c1, x4 -- c1.Tag is false, must be a violation
 1:
     j 1b
 

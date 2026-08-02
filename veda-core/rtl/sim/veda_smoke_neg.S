@@ -37,11 +37,11 @@ _start:
     csrw  mtvec, t0
 
     li    x1, 50
-    .word 0x0010d00b     // veda.bind.notrap c0, x1 (Object_ID=50, never populated -> c0.Tag=0)
+    .insn i 0x0b, 0x5, x0, x1, 1  // veda.bind.notrap c0, x1 (Object_ID=50, never populated -> c0.Tag=0)
     li    x2, 0
     li    x3, 0x9999      // a value that must never actually land in memory
 fault_instr:
-    .word 0x0220318b       // ocs.d c0, x2, x3 -- c0 is untagged, must genuinely TRAP
+    .insn r 0x0b, 0x3, 0x01, x3, x0, x2  // ocs.d c0, x2, x3 -- c0 is untagged, must genuinely TRAP
 
     // Execution resumes here (mepc+4) after the handler's own MRET --
     // this is also where a MISSING trap would fall through to, so the

@@ -5,9 +5,9 @@ _start:
     la   t0, trap_handler
     csrw mtvec, t0
     li   x1, 2          # Object_ID = 2 (Load+Store only, NO Permit_NMC_Compute)
-    .word 0x0000d00b    # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x4, 0x23
-    .word 0x0440328b    # nmc_add.d x5, c0, x4 -- must trap, cause 0x1f
+    .insn r 0x0b, 0x3, 0x02, x5, x0, x4  # nmc_add.d x5, c0, x4 -- must trap, cause 0x1f
     RVMODEL_HALT_FAIL
 
 .balign 4

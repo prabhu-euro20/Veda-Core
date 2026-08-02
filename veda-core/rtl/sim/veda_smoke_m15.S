@@ -14,11 +14,11 @@ _start:
     or   x5, x5, x20
     li   x1, 30
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (Object_ID=30 -> obj30_a)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (Object_ID=30 -> obj30_a)
     li   x1, 30
-    .word 0x0000d00b        # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x2, 0
-    .word 0x0020340b        # ocl.d x8, x2, c0   -> x8 = 0x1111... (Object_ID=30's own object)
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x2  # ocl.d x8, x2, c0   -> x8 = 0x1111... (Object_ID=30's own object)
 
     la   x5, obj31
     slli x5, x5, 32
@@ -26,11 +26,11 @@ _start:
     or   x5, x5, x20
     li   x1, 31
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (Object_ID=31 -> obj31)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (Object_ID=31 -> obj31)
     li   x1, 31
-    .word 0x0000d08b        # veda.bind c1, x1
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1
     li   x2, 0
-    .word 0x0020b48b        # ocl.d x9, x2, c1   -> x9 = 0x2222... (Object_ID=31's own object, unaffected)
+    .insn r 0x0b, 0x3, 0x00, x9, x1, x2  # ocl.d x9, x2, c1   -> x9 = 0x2222... (Object_ID=31's own object, unaffected)
 
     // Legitimate same-ID re-populate: Object_ID=30 again, new backing
     // memory (obj30_b) -- must succeed and correctly reflect the NEW
@@ -42,11 +42,11 @@ _start:
     or   x5, x5, x20
     li   x1, 30
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (Object_ID=30 -> obj30_b, real re-populate)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (Object_ID=30 -> obj30_b, real re-populate)
     li   x1, 30
-    .word 0x0000d10b        # veda.bind c2, x1
+    .insn i 0x0b, 0x5, x2, x1, 0  # veda.bind c2, x1
     li   x2, 0
-    .word 0x0021350b        # ocl.d x10, x2, c2  -> x10 = 0x3333... (the NEW obj30_b content)
+    .insn r 0x0b, 0x3, 0x00, x10, x2, x2  # ocl.d x10, x2, c2  -> x10 = 0x3333... (the NEW obj30_b content)
 
 done:
 1:

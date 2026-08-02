@@ -23,27 +23,27 @@ _start:
     or   t0, t0, t1
     li   x1, 70
     mv   x2, t0
-    .word 0x0620828b           # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     # Object_ID=71: type-authority object, Permit_Seal|Permit_Unseal
     # (bits 8+9) = 0x0300 -- the same real fixture pattern already
     # proven in the CSeal/CUnseal and OCInvoke tests above.
     li   x1, 71
     li   x2, 0x8001100000400300
-    .word 0x0620828b           # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 70
-    .word 0x0000d00b           # veda.bind c0, x1   -- target, unsealed, Offset=0 (resolves to landing_pad exactly)
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1   -- target, unsealed, Offset=0 (resolves to landing_pad exactly)
     li   x1, 71
-    .word 0x0000d08b           # veda.bind c1, x1   -- type authority
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1   -- type authority
 
     # -- Seal the target under the authority, exactly matching the real
     #    call-site convention STACK_FRAME_CALL_RETURN_ANALYSIS.md already
     #    verified working (OCA+CSeal), simplified here to a direct CSeal
     #    since Offset=0 already resolves to the real target address. --
-    .word 0x2010115b           # cseal c2, c0, c1   -- sealed return-capability, otype=c1.Offset=0
-    .word 0x0601055b           # cgettag  x10, c2   -- expect 1
-    .word 0x080105db           # cgettype x11, c2   -- expect 0 (sealed, not 0xFFFF)
+    .insn r 0x5b, 0x1, 0x10, x2, x0, x1  # cseal c2, c0, c1   -- sealed return-capability, otype=c1.Offset=0
+    .insn r 0x5b, 0x0, 0x03, x10, x2, x0  # cgettag  x10, c2   -- expect 1
+    .insn r 0x5b, 0x0, 0x04, x11, x2, x0  # cgettype x11, c2   -- expect 0 (sealed, not 0xFFFF)
 
     # -- The real, atomic verify-and-jump: checks Tag(c2), Tag(c1),
     #    Seal(c2) must hold, Seal(c1) must NOT hold, Permit_Unseal(c1),
@@ -53,7 +53,7 @@ _start:
     #    instead (no handler installed in this positive test -- a real
     #    trap here would correctly fail the test via sail_riscv_sim's own
     #    real unhandled-trap behavior, not silently continue). --
-    .word 0x2811105b           # ocjalr c2, c1
+    .insn r 0x5b, 0x1, 0x14, x0, x2, x1  # ocjalr c2, c1
 
     # If OCJALR somehow fell through instead of jumping or trapping,
     # execution would reach here -- a real, distinct failure signature.

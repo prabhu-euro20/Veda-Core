@@ -5,14 +5,14 @@ _start:
     la   t0, trap_handler
     csrw mtvec, t0
     li   x1, 1
-    .word 0x0000d00b    # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x1, 3
-    .word 0x0000d10b     # veda.bind c2, x1
+    .insn i 0x0b, 0x5, x2, x1, 0  # veda.bind c2, x1
     li   x2, 5
-    .word 0x1421115b      # oca c2, c2, x2
-    .word 0x202010db       # cseal c1, c0, c2  (c1 sealed, otype=5, Tag=1)
+    .insn r 0x5b, 0x1, 0x0a, x2, x2, x2  # oca c2, c2, x2
+    .insn r 0x5b, 0x1, 0x10, x1, x0, x2  # cseal c1, c0, c2  (c1 sealed, otype=5, Tag=1)
     li   x3, 0xAA
-    .word 0x0220b18b        # ocs.d c1, x2, x3 -- c1 is sealed, must hard-trap (cause 0x03)
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3 -- c1 is sealed, must hard-trap (cause 0x03)
     RVMODEL_HALT_FAIL
 
 .balign 4

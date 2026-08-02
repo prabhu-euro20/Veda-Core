@@ -26,18 +26,18 @@ _start:
 
     li   x1, 3                       # Object_ID = 3 (never seeded at reset -- a real fresh mint)
     li   x2, 0x800102000040100C      # descriptor: Base=0x80010200 Length=0x40 Perms=0x100C (Load|Store|NMC_Compute)
-    .word 0x0620828b                 # veda.odt.populate x5, x1, x2  (privileged -> real write)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2  (privileged -> real write)
 
-    .word 0x0000d00b                 # veda.bind c0, x1   -- expect c0.Tag=1, Base=0x80010200 (the just-populated values, not a stale seed)
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1   -- expect c0.Tag=1, Base=0x80010200 (the just-populated values, not a stale seed)
 
     li   x3, 0                       # OCS/OCL offset
     li   x4, 0x1234567890ABCDEF      # value to round-trip through c0
-    .word 0x0230320b                 # ocs.d c0, x3, x4   -- store x4 at c0's own Base+0
-    .word 0x0030330b                 # ocl.d c0, x3, x6   -- expect x6 == x4
+    .insn r 0x0b, 0x3, 0x01, x4, x0, x3  # ocs.d c0, x3, x4   -- store x4 at c0's own Base+0
+    .insn r 0x0b, 0x3, 0x00, x6, x0, x3  # ocl.d c0, x3, x6   -- expect x6 == x4
 
-    .word 0x000003db                 # cgetbase x7, c0    -- expect 0x80010200 (confirms the populate's own Base actually landed, not the ODT's old contents)
+    .insn r 0x5b, 0x0, 0x00, x7, x0, x0  # cgetbase x7, c0    -- expect 0x80010200 (confirms the populate's own Base actually landed, not the ODT's old contents)
 
-    .word 0x0600948b                 # veda.odt.destroy x9, x1   -- invalidate Object_ID=3, bump generation
+    .insn r 0x0b, 0x1, 0x03, x9, x1, x0  # veda.odt.destroy x9, x1   -- invalidate Object_ID=3, bump generation
 
     # Milestone 13 update: plain Bind against a destroyed (now invalid)
     # Object_ID genuinely hard-traps on its own since this milestone
@@ -46,11 +46,11 @@ _start:
     # delivery (covered separately), so Bind-NoTrap -- the
     # architecturally correct "soft-fail, don't disrupt control flow"
     # instruction since Milestone 8 -- replaces plain Bind here.
-    .word 0x0010d08b                 # veda.bind.notrap c1, x1   -- rebind against the now-destroyed Object_ID -- expect c1.Tag=0 (ODT entry invalid)
-    .word 0x0600855b                 # cgettag x10, c1    -- expect 0
+    .insn i 0x0b, 0x5, x1, x1, 1  # veda.bind.notrap c1, x1   -- rebind against the now-destroyed Object_ID -- expect c1.Tag=0 (ODT entry invalid)
+    .insn r 0x5b, 0x0, 0x03, x10, x1, x0  # cgettag x10, c1    -- expect 0
 
     li   x11, 0xDEAD                 # sentinel -- must survive untouched below
-    .word 0x0030358b                 # ocl.d c0, x3, x11  -- c0's own cached generation is now stale (destroy bumped the ODT's); must be rejected, x11 stays 0xDEAD
+    .insn r 0x0b, 0x3, 0x00, x11, x0, x3  # ocl.d c0, x3, x11  -- c0's own cached generation is now stale (destroy bumped the ODT's); must be rejected, x11 stays 0xDEAD
 1:
     j 1b
 

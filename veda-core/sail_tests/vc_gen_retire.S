@@ -19,7 +19,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (v1)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v1)
 
     li   x5, 0x80020300
     slli x5, x5, 32
@@ -27,7 +27,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (v2, real re-populate #1)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v2, real re-populate #1)
 
     li   x5, 0x80020400
     slli x5, x5, 32
@@ -35,7 +35,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (v3, real re-populate #2)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v3, real re-populate #2)
 
     li   x5, 0x80020500
     slli x5, x5, 32
@@ -43,7 +43,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (v4, real re-populate #3)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v4, real re-populate #3)
 
     li   x5, 0x80020600
     slli x5, x5, 32
@@ -51,7 +51,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (v5, real re-populate #4)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v5, real re-populate #4)
 
     # Fresh bind to the 5th incarnation -- must succeed normally (not
     # refused, not stale). Real write-then-read round trip (the object's
@@ -59,11 +59,11 @@ _start:
     # first would only prove access was permitted, not that it reached
     # the real, correct object).
     mv   x1, x7
-    .word 0x0000d00b          # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x2, 0
     li   x11, 0x5555
-    .word 0x0220358b          # ocs.d c0, x2, x11
-    .word 0x0020340b          # ocl.d x8, x2, c0
+    .insn r 0x0b, 0x3, 0x01, x11, x0, x2  # ocs.d c0, x2, x11
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x2  # ocl.d x8, x2, c0
 
     li   t4, 0x5555
     bne  x8, t4, check_fail

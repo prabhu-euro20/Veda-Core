@@ -18,7 +18,7 @@ _start:
     csrw mtvec, t0
 
     li   x5, 5
-    .word 0x0002d00b     # veda.bind c0, x5   -- Object_ID=5, owned by hart 99 -- must hard-trap (cause 0x06)
+    .insn i 0x0b, 0x5, x0, x5, 0  # veda.bind c0, x5   -- Object_ID=5, owned by hart 99 -- must hard-trap (cause 0x06)
     RVMODEL_HALT_FAIL
 
 .balign 4

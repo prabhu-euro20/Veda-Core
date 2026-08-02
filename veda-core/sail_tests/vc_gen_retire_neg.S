@@ -24,14 +24,14 @@ _start:
     or   x5, x5, x9
     li   x1, 50
     mv   x2, x5
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 50
-    .word 0x0000d00b          # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
 
     li   x1, 50
     .rept 256
-    .word 0x0600948b          # veda.odt.destroy x9, x1
+    .insn r 0x0b, 0x1, 0x03, x9, x1, x0  # veda.odt.destroy x9, x1
     .endr
 
     # Fixed behavior: the slot is now permanently retired (generation
@@ -45,7 +45,7 @@ _start:
     li   x1, 50
     mv   x2, x5
 repopulate_instr:
-    .word 0x0620828b          # veda.odt.populate x5, x1, x2 (must be REFUSED)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (must be REFUSED)
 
     RVMODEL_HALT_FAIL          # reached only if the repopulate above wrongly succeeded
 
@@ -67,7 +67,7 @@ retire_trap_handler:
     csrw mtvec, t0
     li   x2, 0
 fault_instr:
-    .word 0x0020340b          # ocl.d x8, x2, c0
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x2  # ocl.d x8, x2, c0
 
     RVMODEL_HALT_FAIL          # reached only if the stale access wrongly succeeded
 

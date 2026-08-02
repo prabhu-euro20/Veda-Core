@@ -22,22 +22,22 @@ _start:
     or   t0, t0, t1
     li   x1, 70
     mv   x2, t0
-    .word 0x0620828b           # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     # Object_ID=71: type-authority object, Permit_Seal|Permit_Unseal.
     li   x1, 71
     li   x2, 0x8001100000400300
-    .word 0x0620828b           # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 70
-    .word 0x0000d00b           # veda.bind c0, x1   -- target, unsealed
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1   -- target, unsealed
     li   x1, 71
-    .word 0x0000d08b           # veda.bind c1, x1   -- type authority
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1   -- type authority
 
-    .word 0x2010115b           # cseal c2, c0, c1   -- sealed return-capability, otype=c1.Offset=0
+    .insn r 0x5b, 0x1, 0x10, x2, x0, x1  # cseal c2, c0, c1   -- sealed return-capability, otype=c1.Offset=0
 
     # -- The real, atomic verify-and-jump. --
-    .word 0x2811105b           # ocjalr c2, c1
+    .insn r 0x5b, 0x1, 0x14, x0, x2, x1  # ocjalr c2, c1
 
     # If OCJALR somehow fell through instead of jumping or trapping,
     # execution would reach here -- a real, distinct failure signature.

@@ -20,7 +20,7 @@ _start:
 
     li   x3, 60
 fault_instr:
-    .word 0x0001d00b     // veda.bind c0, x3   -- Object_ID=60, owned by hart 0x63 -- must hard-trap (cause 0x06)
+    .insn i 0x0b, 0x5, x0, x3, 0  // veda.bind c0, x3   -- Object_ID=60, owned by hart 0x63 -- must hard-trap (cause 0x06)
 
     // Correct-resume sentinel -- MRET's own real PC redirect lands
     // EXACTLY here (mepc+4, the handler's own advance past the fault),
@@ -32,8 +32,8 @@ fault_instr:
     // path elsewhere in this project. c0 was never bound before this
     // test's own faulting instruction, so its true reset value (Tag=0,
     // Base=0) is the only value that proves nothing wrote to it at all.
-    .word 0x06000bdb      // cgettag  x23, c0   -- expect 0 (reset value, untouched)
-    .word 0x00000c5b       // cgetbase x24, c0   -- expect 0 (reset value, untouched)
+    .insn r 0x5b, 0x0, 0x03, x23, x0, x0  // cgettag  x23, c0   -- expect 0 (reset value, untouched)
+    .insn r 0x5b, 0x0, 0x00, x24, x0, x0  // cgetbase x24, c0   -- expect 0 (reset value, untouched)
     j    done
 
 trap_handler:

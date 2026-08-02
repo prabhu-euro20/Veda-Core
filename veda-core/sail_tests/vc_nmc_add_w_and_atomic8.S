@@ -20,19 +20,19 @@ _start:
     # positive results are already computed and sitting in registers
     # before the one instruction that's expected to trap runs.
     li   x1, 1
-    .word 0x0000d00b    # veda.bind c0, x1  (Object_ID=1: Perms=0x100C, HAS Permit_NMC_Compute)
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1  (Object_ID=1: Perms=0x100C, HAS Permit_NMC_Compute)
     li   x1, 2
-    .word 0x0000d08b     # veda.bind c1, x1  (Object_ID=2: Perms=0x000C, Load+Store ONLY -- no Permit_NMC_Compute)
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1  (Object_ID=2: Perms=0x000C, Load+Store ONLY -- no Permit_NMC_Compute)
 
     # -- NMC_ADD.W via c0: sign-extension of the old 32-bit value into a
     #    64-bit rd, and that the write-back only touches the low 4 bytes,
     #    leaving the upper 4 bytes untouched --
     li   x2, 0
     li   x3, 0xCAFEBABE80000000
-    .word 0x0220318b      # ocs.d c0, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x0, x2  # ocs.d c0, x2, x3
     li   x3, 0x20
-    .word 0x0430250b       # nmc_add.w x10, c0, x3  -- expect x10 = sign_extend32(0x80000000) = 0xFFFFFFFF80000000
-    .word 0x0020358b        # ocl.d c0, x2, x11      -- expect x11 = 0xCAFEBABE80000020
+    .insn r 0x0b, 0x2, 0x02, x10, x0, x3  # nmc_add.w x10, c0, x3  -- expect x10 = sign_extend32(0x80000000) = 0xFFFFFFFF80000000
+    .insn r 0x0b, 0x3, 0x00, x11, x0, x2  # ocl.d c0, x2, x11      -- expect x11 = 0xCAFEBABE80000020
 
     # -- 8 remaining Veda-Atomic ops via c1 (Load+Store only, deliberately
     #    NO Permit_NMC_Compute) -- c1.Offset walked forward in +8 steps
@@ -43,73 +43,73 @@ _start:
     # SWAP @0
     li   x2, 0
     li   x3, 0x1111
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 0x2222
-    .word 0x0830b62b       # veda.amoswap.d x12, c1, x3
-    .word 0x0020ba0b        # ocl.d c1, x2, x20
+    .insn r 0x2b, 0x3, 0x04, x12, x1, x3  # veda.amoswap.d x12, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x20, x1, x2  # ocl.d c1, x2, x20
 
     # ADD @8
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 8
     li   x3, 5
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 0xA
-    .word 0x0030b6ab       # veda.amoadd.d x13, c1, x3
-    .word 0x0020ba8b        # ocl.d c1, x2, x21
+    .insn r 0x2b, 0x3, 0x00, x13, x1, x3  # veda.amoadd.d x13, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x21, x1, x2  # ocl.d c1, x2, x21
 
     # AND @16
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 16
     li   x3, 0xFF
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 0x0F
-    .word 0x6030b72b       # veda.amoand.d x14, c1, x3
-    .word 0x0020bb0b        # ocl.d c1, x2, x22
+    .insn r 0x2b, 0x3, 0x30, x14, x1, x3  # veda.amoand.d x14, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x22, x1, x2  # ocl.d c1, x2, x22
 
     # OR @24
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 24
     li   x3, 0xF0
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 0x0F
-    .word 0x4030b7ab       # veda.amoor.d x15, c1, x3
-    .word 0x0020bb8b        # ocl.d c1, x2, x23
+    .insn r 0x2b, 0x3, 0x20, x15, x1, x3  # veda.amoor.d x15, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x23, x1, x2  # ocl.d c1, x2, x23
 
     # MIN (signed) @32 -- old=-1, rs2=1: signed(-1<1) -> keeps old
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 32
     li   x3, -1
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 1
-    .word 0x8030b82b       # veda.amomin.d x16, c1, x3
-    .word 0x0020bc0b        # ocl.d c1, x2, x24
+    .insn r 0x2b, 0x3, 0x40, x16, x1, x3  # veda.amomin.d x16, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x24, x1, x2  # ocl.d c1, x2, x24
 
     # MAX (signed) @40 -- old=-1, rs2=1: signed(-1<1) -> takes rs2
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 40
     li   x3, -1
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 1
-    .word 0xa030b8ab       # veda.amomax.d x17, c1, x3
-    .word 0x0020bc8b        # ocl.d c1, x2, x25
+    .insn r 0x2b, 0x3, 0x50, x17, x1, x3  # veda.amomax.d x17, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x25, x1, x2  # ocl.d c1, x2, x25
 
     # MINU (unsigned) @48 -- old=0xFFFF...FFFF, rs2=1: unsigned(huge>1) -> takes rs2
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 48
     li   x3, -1
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 1
-    .word 0xc030b92b       # veda.amominu.d x18, c1, x3
-    .word 0x0020bd0b        # ocl.d c1, x2, x26
+    .insn r 0x2b, 0x3, 0x60, x18, x1, x3  # veda.amominu.d x18, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x26, x1, x2  # ocl.d c1, x2, x26
 
     # MAXU (unsigned) @56 -- old=0xFFFF...FFFF, rs2=1: unsigned(huge>1) -> keeps old
-    .word 0x149090db      # oca c1, c1, x9
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9
     li   x2, 56
     li   x3, -1
-    .word 0x0220b18b      # ocs.d c1, x2, x3
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3
     li   x3, 1
-    .word 0xe030b9ab       # veda.amomaxu.d x19, c1, x3
-    .word 0x0020bd8b        # ocl.d c1, x2, x27
+    .insn r 0x2b, 0x3, 0x70, x19, x1, x3  # veda.amomaxu.d x19, c1, x3
+    .insn r 0x0b, 0x3, 0x00, x27, x1, x2  # ocl.d c1, x2, x27
 
     # -- All positive results are now computed and safely in registers.
     #    Install the trap handler, then trigger the one real negative
@@ -119,7 +119,7 @@ _start:
     la   t0, trap_handler
     csrw mtvec, t0
     li   x3, 0x99
-    .word 0x0430ae0b       # nmc_add.w x28, c1, x3  -- must trap, cause 0x1f, cap_idx=1 (c1)
+    .insn r 0x0b, 0x2, 0x02, x28, x1, x3  # nmc_add.w x28, c1, x3  -- must trap, cause 0x1f, cap_idx=1 (c1)
     RVMODEL_HALT_FAIL
 
 .balign 4

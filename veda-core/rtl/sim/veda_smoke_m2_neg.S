@@ -13,13 +13,13 @@ _start:
     csrw  mtvec, t0
 
     li   x1, 2          // Object_ID = 2 -- Load+Store only, NO Permit_NMC_Compute
-    .word 0x0000d00b    // veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  // veda.bind c0, x1
     li   x2, 0x10         // OCA delta
-    .word 0x142010db       // oca c1, c0, x2   (c1.Offset = 0x10; OCA itself needs no permission)
+    .insn r 0x5b, 0x1, 0x0a, x1, x0, x2  // oca c1, c0, x2   (c1.Offset = 0x10; OCA itself needs no permission)
     li   x4, 0x23             // value operand (irrelevant, should never be used)
     li   x5, 0x5555             // sentinel: must stay unchanged if NMC_ADD is correctly blocked
 fault_instr:
-    .word 0x0440b28b               // nmc_add.d x5, c1, x4 -- c1 lacks Permit_NMC_Compute, must genuinely TRAP
+    .insn r 0x0b, 0x3, 0x02, x5, x1, x4  // nmc_add.d x5, c1, x4 -- c1 lacks Permit_NMC_Compute, must genuinely TRAP
 
     // Execution resumes here (mepc+4) after the handler's own MRET --
     // also where a MISSING trap would fall through to; the handler

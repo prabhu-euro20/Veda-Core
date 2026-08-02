@@ -20,7 +20,7 @@ _start:
 
     li   x1, 70
 fault_instr:
-    .word 0x0000d00b     // veda.bind c0, x1 -- Object_ID=70, never populated -- must hard-trap (cause 0x05)
+    .insn i 0x0b, 0x5, x0, x1, 0  // veda.bind c0, x1 -- Object_ID=70, never populated -- must hard-trap (cause 0x05)
 
     // Correct-resume sentinel -- MRET's own real PC redirect lands
     // EXACTLY here (mepc+4), mirroring veda_smoke_m12_neg.S's own
@@ -29,8 +29,8 @@ fault_instr:
     // Destination register c0 must be COMPLETELY untouched by the trap
     // (Sail's own veda_trap() diverts control flow before wC()/wCTag()
     // are ever called) -- not even Tag cleared.
-    .word 0x06000bdb      // cgettag  x23, c0   -- expect 0 (reset value, untouched)
-    .word 0x00000c5b       // cgetbase x24, c0   -- expect 0 (reset value, untouched)
+    .insn r 0x5b, 0x0, 0x03, x23, x0, x0  // cgettag  x23, c0   -- expect 0 (reset value, untouched)
+    .insn r 0x5b, 0x0, 0x00, x24, x0, x0  // cgetbase x24, c0   -- expect 0 (reset value, untouched)
     j    done
 
 trap_handler:

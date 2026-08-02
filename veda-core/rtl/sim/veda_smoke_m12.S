@@ -25,23 +25,23 @@ _start:
     // -- Step 1: Object_ID=1 (reset-seeded, unowned) -- plain Bind must
     //    succeed AND claim it for this hart (MHARTID=0). --
     li   x1, 1
-    .word 0x0000d00b        // veda.bind c0, x1
-    .word 0x0600055b         // cgettag  x10, c0   -- expect 1
-    .word 0x000005db          // cgetbase x11, c0   -- expect 0x80010000
+    .insn i 0x0b, 0x5, x0, x1, 0  // veda.bind c0, x1
+    .insn r 0x5b, 0x0, 0x03, x10, x0, x0  // cgettag  x10, c0   -- expect 1
+    .insn r 0x5b, 0x0, 0x00, x11, x0, x0  // cgetbase x11, c0   -- expect 0x80010000
 
     // -- Step 2: Rebind the SAME object -- now owned by hart 0, this
     //    hart's own real identity, so owner_ok must take the "self-owns"
     //    branch (not the "unowned" branch already proven in Step 1). --
-    .word 0x0020d00b        // veda.rebind c0, x1
-    .word 0x0600065b         // cgettag  x12, c0   -- expect 1
-    .word 0x000006db          // cgetbase x13, c0   -- expect 0x80010000 (unchanged, same object)
+    .insn i 0x0b, 0x5, x0, x1, 2  // veda.rebind c0, x1
+    .insn r 0x5b, 0x0, 0x03, x12, x0, x0  // cgettag  x12, c0   -- expect 1
+    .insn r 0x5b, 0x0, 0x00, x13, x0, x0  // cgetbase x13, c0   -- expect 0x80010000 (unchanged, same object)
 
     // -- Step 3: Object_ID=60 -- the RTL reset-seeded fixture pre-claimed
     //    by owner_hart=0x63. Bind-NoTrap must soft-fail (Tag cleared,
     //    no trap). --
     li   x3, 60
-    .word 0x0011d08b        // veda.bind.notrap c1, x3
-    .word 0x0600875b         // cgettag  x14, c1   -- expect 0 (soft-fail, wrong owner)
+    .insn i 0x0b, 0x5, x1, x3, 1  // veda.bind.notrap c1, x3
+    .insn r 0x5b, 0x0, 0x03, x14, x1, x0  // cgettag  x14, c1   -- expect 0 (soft-fail, wrong owner)
 
     // -- Step 4: Rebind against the SAME wrong-owner object -- Rebind
     //    never traps for ANY reason, so a wrong-owner Rebind must ALSO
@@ -49,13 +49,13 @@ _start:
     //    the target so the "already sealed" short-circuit doesn't fire
     //    first -- isolates the owner-check path specifically. --
     li   x1, 1
-    .word 0x0000d10b        // veda.bind c2, x1        -- c2: Object_ID=1, Tag=1, Base=0x80010000
-    .word 0x060107db         // cgettag  x15, c2   -- expect 1
-    .word 0x0001085b          // cgetbase x16, c2   -- expect 0x80010000
+    .insn i 0x0b, 0x5, x2, x1, 0  // veda.bind c2, x1        -- c2: Object_ID=1, Tag=1, Base=0x80010000
+    .insn r 0x5b, 0x0, 0x03, x15, x2, x0  // cgettag  x15, c2   -- expect 1
+    .insn r 0x5b, 0x0, 0x00, x16, x2, x0  // cgetbase x16, c2   -- expect 0x80010000
     li   x3, 60
-    .word 0x0021d10b        // veda.rebind c2, x3      -- Object_ID=60, wrong owner
-    .word 0x060108db         // cgettag  x17, c2   -- expect 0 (soft-fail, Tag cleared)
-    .word 0x0001095b          // cgetbase x18, c2   -- expect 0x80010000 (UNCHANGED -- still c2's OLD Base, never overwritten by Object_ID=60's 0x80010200)
+    .insn i 0x0b, 0x5, x2, x3, 2  // veda.rebind c2, x3      -- Object_ID=60, wrong owner
+    .insn r 0x5b, 0x0, 0x03, x17, x2, x0  // cgettag  x17, c2   -- expect 0 (soft-fail, Tag cleared)
+    .insn r 0x5b, 0x0, 0x00, x18, x2, x0  // cgetbase x18, c2   -- expect 0x80010000 (UNCHANGED -- still c2's OLD Base, never overwritten by Object_ID=60's 0x80010200)
 
 1:
     j 1b

@@ -29,27 +29,27 @@ _start:
     or   t0, t0, t1
     li   x1, 80
     mv   x2, t0
-    .word 0x0620828b              # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 81
     li   x2, 0x8001070000400400
-    .word 0x0620828b              # veda.odt.populate x5, x1, x2  -- Object_ID=81 (DATA)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2  -- Object_ID=81 (DATA)
 
     li   x1, 82
     li   x2, 0x8001080000400300
-    .word 0x0620828b              # veda.odt.populate x5, x1, x2  -- Object_ID=82 (type authority)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2  -- Object_ID=82 (type authority)
 
     li   x1, 80
-    .word 0x0000d00b              # veda.bind c0, x1  -- CODE
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1  -- CODE
     li   x1, 81
-    .word 0x0000d08b              # veda.bind c1, x1  -- DATA
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1  -- DATA
     li   x1, 82
-    .word 0x0000d10b              # veda.bind c2, x1  -- type authority
+    .insn i 0x0b, 0x5, x2, x1, 0  # veda.bind c2, x1  -- type authority
 
-    .word 0x202011db              # cseal c3, c0, c2
-    .word 0x2020925b              # cseal c4, c1, c2
+    .insn r 0x5b, 0x1, 0x10, x3, x0, x2  # cseal c3, c0, c2
+    .insn r 0x5b, 0x1, 0x10, x4, x1, x2  # cseal c4, c1, c2
 
-    .word 0x2441905b              # ocinvoke c3, c4   -- narrows PCC to [compartment_start, compartment_start+4)
+    .insn r 0x5b, 0x1, 0x12, x0, x3, x4  # ocinvoke c3, c4   -- narrows PCC to [compartment_start, compartment_start+4)
 
 compartment_start:
     addi x0, x0, 0                # the ONLY instruction inside the compartment -- fetch is genuinely in-bounds here

@@ -22,13 +22,13 @@ _start:
 
     li   x1, 61
     li   x2, 0x80010600     # Base, direct
-    .word 0x0820800b        # veda.odt.populate.fast x0, x1, x2
-    .word 0x0000d08b        # veda.bind c1, x1
+    .insn r 0x0b, 0x0, 0x04, x0, x1, x2  # veda.odt.populate.fast x0, x1, x2
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1
 
     li   x6, 0x10           # offset 0x10, width 8 -> offset+width=0x18 > Length=0x8
     li   x7, 0x99
 fault_instr:
-    .word 0x0260b38b        # ocs.d c1, x6, x7 -- must hard-trap Bounds Violation
+    .insn r 0x0b, 0x3, 0x01, x7, x1, x6  # ocs.d c1, x6, x7 -- must hard-trap Bounds Violation
 
     RVMODEL_HALT_FAIL        # falling through means the expected trap never fired
 

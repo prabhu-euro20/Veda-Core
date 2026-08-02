@@ -6,17 +6,17 @@ _start:
     csrw mtvec, t0
     li   x1, 5                     # a fresh Object_ID, never touched by the test scaffold
     li   x2, 0x800104000040100c    # descriptor: Base=0x80010400, Length=0x40, Perms=0x100C
-    .word 0x0620800b               # veda.odt.populate x0, x1, x2
-    .word 0x0000d00b                # veda.bind c0, x1
+    .insn r 0x0b, 0x0, 0x03, x0, x1, x2  # veda.odt.populate x0, x1, x2
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x3, 0                       # access offset
     li   x4, 0x77                     # value to store
-    .word 0x0230320b                  # ocs.d c0, x3, x4  -- must succeed
+    .insn r 0x0b, 0x3, 0x01, x4, x0, x3  # ocs.d c0, x3, x4  -- must succeed
     li   x5, 0
-    .word 0x0030328b                   # ocl.d c0, x3, x5  -- load back, expect 0x77
+    .insn r 0x0b, 0x3, 0x00, x5, x0, x3  # ocl.d c0, x3, x5  -- load back, expect 0x77
     li   x20, 0x77
     bne  x5, x20, self_check_fail       # positive phase must hold before continuing
-    .word 0x0600900b                     # veda.odt.destroy x0, x1  -- destroys Object_ID=5
-    .word 0x0230320b                      # ocs.d c0, x3, x4 (again) -- c0's generation is now
+    .insn r 0x0b, 0x1, 0x03, x0, x1, x0  # veda.odt.destroy x0, x1  -- destroys Object_ID=5
+    .insn r 0x0b, 0x3, 0x01, x4, x0, x3  # ocs.d c0, x3, x4 (again) -- c0's generation is now
                                            # stale, must hard-trap Tag Violation (cause 0x02)
     j    self_check_fail                  # falling through means the expected trap never fired
 

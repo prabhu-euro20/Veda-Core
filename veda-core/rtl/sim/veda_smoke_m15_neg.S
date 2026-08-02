@@ -17,12 +17,12 @@ _start:
     or   x5, x5, x9
     li   x1, 32
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (Object_ID=32 -> array_a)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (Object_ID=32 -> array_a)
 
     li   x1, 32
-    .word 0x0000d00b        # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x2, 0
-    .word 0x0020340b        # ocl.d x8, x2, c0   -- sanity: x8 = 0xAAAA...
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x2  # ocl.d x8, x2, c0   -- sanity: x8 = 0xAAAA...
 
     la   x5, array_b
     slli x5, x5, 32
@@ -30,7 +30,7 @@ _start:
     or   x5, x5, x9
     li   x1, 288
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (Object_ID=288, alias -> array_b)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (Object_ID=288, alias -> array_b)
 
     la   t0, trap_handler
     csrw mtvec, t0
@@ -41,7 +41,7 @@ _start:
     // the c1 destination -> mtval=(1<<5)|0x05=0x25).
     li   x1, 32
 fault_instr:
-    .word 0x0000d08b        # veda.bind c1, x1
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1
     li   x22, 0xDEAD         # reached only if the old, buggy behavior recurred
     j    done
 

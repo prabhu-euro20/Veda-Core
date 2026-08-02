@@ -44,13 +44,13 @@ _start:
     #    requirement of both bits).
     li   x1, 20
     li   x2, 0x800105000040000C
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     li   x1, 20
-    .word 0x0000d08b        # veda.bind c1, x1        -- c1: Base=0x80010500, Offset=0, Tag=1
+    .insn i 0x0b, 0x5, x1, x1, 0  # veda.bind c1, x1        -- c1: Base=0x80010500, Offset=0, Tag=1
 
     li   x9, 8
-    .word 0x149090db        # oca c1, c1, x9          -- c1.Offset: 0 -> 8
+    .insn r 0x5b, 0x1, 0x0a, x1, x1, x9  # oca c1, c1, x9          -- c1.Offset: 0 -> 8
 
     # AMO's own "old value" read is real memory content -- elfmem is
     # NOT zero-initialized outside the ELF-loaded region (only the
@@ -63,17 +63,17 @@ _start:
     # pattern for the same reason), so the AMO's old-value result is
     # verifiable rather than simulator-undefined.
     li   x2, 8
-    .word 0x0220b00b        # ocs.d c1, x2, x0        -- seed memory @ (0x80010500+8) = 0
+    .insn r 0x0b, 0x3, 0x01, x0, x1, x2  # ocs.d c1, x2, x0        -- seed memory @ (0x80010500+8) = 0
     li   x3, 5
-    .word 0x0030b52b        # veda.amoadd.d x10, c1, x3   -- old value(0) @ (0x80010500+8) into x10, writes 0+5=5
-    .word 0x0020ba0b        # ocl.d c1, x2, x20       -- independent read-back @ same address -- expect x20=5
+    .insn r 0x2b, 0x3, 0x00, x10, x1, x3  # veda.amoadd.d x10, c1, x3   -- old value(0) @ (0x80010500+8) into x10, writes 0+5=5
+    .insn r 0x0b, 0x3, 0x00, x20, x1, x2  # ocl.d c1, x2, x20       -- independent read-back @ same address -- expect x20=5
 
     # -- Step 2: silently relocate Object_ID=20 -> Base=0x80010600
     #    (same Length/Perms) -- bumps the ODT slot's own generation,
     #    exactly like a real MSA-driven object move would.
     li   x1, 20
     li   x2, 0x800106000040000C
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
 
     # -- Step 3: c1 is now stale (cached generation != ODT's new
     #    generation) -- a real AMO through c1 must be rejected, leaving
@@ -82,16 +82,16 @@ _start:
     #    caught (mirrors MILESTONE_6_RESULTS.md's own sentinel idiom).
     li   x11, 0xDEAD
     li   x3, 9
-    .word 0x0030b5ab        # veda.amoadd.d x11, c1, x3   -- must soft-fail (gen_stale): x11 stays 0xDEAD
+    .insn r 0x2b, 0x3, 0x00, x11, x1, x3  # veda.amoadd.d x11, c1, x3   -- must soft-fail (gen_stale): x11 stays 0xDEAD
 
     # -- Step 4: Rebind c1 against the SAME Object_ID=20 (x1 already
     #    holds 20 from Step 2) -- refreshes Base/generation from the
     #    ODT, but Offset must NOT move.
-    .word 0x0020d08b        # veda.rebind c1, x1
+    .insn i 0x0b, 0x5, x1, x1, 2  # veda.rebind c1, x1
 
-    .word 0x0c00865b        # cgetoffset x12, c1      -- expect 8  (PRESERVED, the entire point of Rebind)
-    .word 0x000086db        # cgetbase   x13, c1      -- expect 0x80010600 (the NEW, relocated Base)
-    .word 0x0600885b        # cgettag    x16, c1      -- expect 1  (real success: ODT valid, c1 wasn't sealed)
+    .insn r 0x5b, 0x0, 0x06, x12, x1, x0  # cgetoffset x12, c1      -- expect 8  (PRESERVED, the entire point of Rebind)
+    .insn r 0x5b, 0x0, 0x00, x13, x1, x0  # cgetbase   x13, c1      -- expect 0x80010600 (the NEW, relocated Base)
+    .insn r 0x5b, 0x0, 0x03, x16, x1, x0  # cgettag    x16, c1      -- expect 1  (real success: ODT valid, c1 wasn't sealed)
 
     # -- Step 5: functional proof -- a fresh AMO through c1's own
     #    still-8 Offset must now land at the NEW physical address
@@ -101,10 +101,10 @@ _start:
     #    as Step 1's own seed above (elfmem is simulator-undefined
     #    outside the ELF-loaded region, not zero by default).
     li   x2, 8
-    .word 0x0220b00b        # ocs.d c1, x2, x0        -- seed memory @ (0x80010600+8) = 0
+    .insn r 0x0b, 0x3, 0x01, x0, x1, x2  # ocs.d c1, x2, x0        -- seed memory @ (0x80010600+8) = 0
     li   x3, 5
-    .word 0x0030b72b        # veda.amoadd.d x14, c1, x3   -- expect x14=0 (the just-seeded old value at the NEW address)
-    .word 0x0020ba8b        # ocl.d c1, x2, x21       -- expect x21=5 (write really landed at the NEW address)
+    .insn r 0x2b, 0x3, 0x00, x14, x1, x3  # veda.amoadd.d x14, c1, x3   -- expect x14=0 (the just-seeded old value at the NEW address)
+    .insn r 0x0b, 0x3, 0x00, x21, x1, x2  # ocl.d c1, x2, x21       -- expect x21=5 (write really landed at the NEW address)
 
 1:
     j 1b

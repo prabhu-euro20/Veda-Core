@@ -14,7 +14,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (v1)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v1)
 
     la   x5, obj_v2
     slli x5, x5, 32
@@ -22,7 +22,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (v2, real re-populate #1)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v2, real re-populate #1)
 
     la   x5, obj_v3
     slli x5, x5, 32
@@ -30,7 +30,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (v3, real re-populate #2)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v3, real re-populate #2)
 
     la   x5, obj_v4
     slli x5, x5, 32
@@ -38,7 +38,7 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (v4, real re-populate #3)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v4, real re-populate #3)
 
     la   x5, obj_v5
     slli x5, x5, 32
@@ -46,14 +46,14 @@ _start:
     or   x5, x5, x20
     mv   x1, x7
     mv   x2, x5
-    .word 0x0620828b        # veda.odt.populate x5, x1, x2 (v5, real re-populate #4)
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 (v5, real re-populate #4)
 
     // Fresh bind to the 5th incarnation -- must succeed normally (not
     // refused, not stale) and see v5's own real value.
     mv   x1, x7
-    .word 0x0000d00b        # veda.bind c0, x1
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1
     li   x2, 0
-    .word 0x0020340b        # ocl.d x8, x2, c0   -> x8 must be 0x5555...
+    .insn r 0x0b, 0x3, 0x00, x8, x0, x2  # ocl.d x8, x2, c0   -> x8 must be 0x5555...
 
 done:
 1:

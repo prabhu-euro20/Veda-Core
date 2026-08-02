@@ -20,7 +20,7 @@ _start:
 
     li   x1, 6
 fault_instr:
-    .word 0x0000d00b     # veda.bind c0, x1 -- Object_ID=6, never populated -- must hard-trap (cause 0x05)
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1 -- Object_ID=6, never populated -- must hard-trap (cause 0x05)
 
     RVMODEL_HALT_FAIL
 

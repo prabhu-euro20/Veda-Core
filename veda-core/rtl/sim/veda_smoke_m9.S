@@ -60,11 +60,11 @@ _start:
     // (the correct "soft-fail" instruction since Milestone 8) is used
     // instead, preserving this test's original intent exactly.
     li    x1, 99
-    .word 0x0010d00b               // veda.bind.notrap c0, x1 (Object_ID=99, never populated -> c0.Tag=0)
+    .insn i 0x0b, 0x5, x0, x1, 1  // veda.bind.notrap c0, x1 (Object_ID=99, never populated -> c0.Tag=0)
     li    x2, 0
     li    x3, 0x9999
 fault_instr:
-    .word 0x0220318b                 // ocs.d c0, x2, x3 -- c0 untagged -> TAG_VIOLATION, must TRAP
+    .insn r 0x0b, 0x3, 0x01, x3, x0, x2  // ocs.d c0, x2, x3 -- c0 untagged -> TAG_VIOLATION, must TRAP
 
     // -- Part 3: execution resumes here (mepc+4, the handler's own
     //    advance), proving MRET's own real PC redirect and the full

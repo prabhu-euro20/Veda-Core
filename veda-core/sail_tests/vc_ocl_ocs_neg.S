@@ -7,7 +7,7 @@ _start:
     csrw mtvec, t0
     li   x2, 0
     li   x3, 0x99
-    .word 0x0220b18b    # ocs.d c1, x2, x3 -- c1 was NEVER bound (Tag=0), must trap
+    .insn r 0x0b, 0x3, 0x01, x3, x1, x2  # ocs.d c1, x2, x3 -- c1 was NEVER bound (Tag=0), must trap
     RVMODEL_HALT_FAIL    # falling through here means the expected trap never fired
 
 .balign 4

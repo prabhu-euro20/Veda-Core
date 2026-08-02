@@ -21,18 +21,18 @@ _start:
 
     li   x1, 6                       # Object_ID = 6 (never seeded at reset -- a real fresh mint)
     li   x2, 0x80010600              # Base, direct -- no <<32 packing needed, unlike plain Populate
-    .word 0x0820800b                 # veda.odt.populate.fast x0, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x0, x1, x2  # veda.odt.populate.fast x0, x1, x2
 
-    .word 0x0000d00b                 # veda.bind c0, x1   -- expect c0.Tag=1, Base=0x80010600
+    .insn i 0x0b, 0x5, x0, x1, 0  # veda.bind c0, x1   -- expect c0.Tag=1, Base=0x80010600
 
     li   x3, 0                       # ordinary-position offset
     li   x4, 0x1234567890ABCDEF
-    .word 0x0230320b                 # ocs.d c0, x3, x4
-    .word 0x0030330b                 # ocl.d c0, x3, x6   -- expect x6 == x4
+    .insn r 0x0b, 0x3, 0x01, x4, x0, x3  # ocs.d c0, x3, x4
+    .insn r 0x0b, 0x3, 0x00, x6, x0, x3  # ocl.d c0, x3, x6   -- expect x6 == x4
 
     li   x7, 0x38                    # boundary offset: 0x38 + 8 == 0x40 == Length -- must succeed
     li   x8, 0x66
-    .word 0x0270340b                 # ocs.d c0, x7, x8
-    .word 0x0070348b                 # ocl.d c0, x7, x9   -- expect x9 == 0x66
+    .insn r 0x0b, 0x3, 0x01, x8, x0, x7  # ocs.d c0, x7, x8
+    .insn r 0x0b, 0x3, 0x00, x9, x0, x7  # ocl.d c0, x7, x9   -- expect x9 == 0x66
 1:
     j 1b
