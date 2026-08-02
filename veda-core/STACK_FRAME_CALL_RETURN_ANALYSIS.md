@@ -280,6 +280,53 @@ programs at N=1,2,4,8,16), `tb_bench_loop.sv` (completion-detecting
 testbench, same "3 consecutive identical PC" signal as
 `OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`).
 
+## Update — a real scope boundary found while auditing compartmentalization against CHERI's own pillars (Milestone 22, 2026-08-01)
+
+`OCJALR` closed the Tag/Seal-check-can-be-forgotten gap above, but had
+never been tested in combination with a live `OCInvoke` compartment
+(`vc_ocjalr.S`/`vc_ocjalr_neg.S` both exercise it entirely outside one).
+Auditing compartmentalization end-to-end (the CHERI pillar Simon Moore's
+own correspondence named, alongside memory safety) surfaced a real,
+empirically-confirmed gap: **`OCJALR` does not reset `veda_pcc_base`/
+`_length`** — its own execute clause (`veda_cap_insts.sail`) is a plain
+`jump_to()` with zero PCC interaction, unlike `OCInvoke`, which narrows
+PCC as a deliberate, load-bearing part of its own real compartment-entry
+semantics.
+
+**Real, empirical finding**: a genuinely valid, correctly-authorized
+sealed return-capability (every one of `OCJALR`'s own real checks —
+Tag/Seal/`Permit_Unseal`/matching-`otype`/`Permit_Execute` — satisfied)
+targeting an address outside a live compartment's own bounds still
+hard-traps on the very next instruction fetch at that target, because
+`veda_pcc_length` is still narrowed when that fetch is attempted.
+Verified with a real PoC under `sail_riscv_sim` before concluding
+anything (`sail_tests/vc_ocjalr_compartment_boundary_neg.S`, the
+permanent regression test).
+
+**Not a security escape** — Milestone 14's own fetch-check remains the
+real backstop exactly as designed, identical in kind to how Milestone
+21's own audit of the `ecall`/generic-trap gap found no new escape
+vector either, just a real functional/scope gap. **A real scope
+boundary, worth stating precisely rather than leaving implicit**:
+`OCJALR` alone cannot cross a compartment boundary. The already
+-established, already-tested primitive for that is a **second
+`OCInvoke`** (into a return-authorized code/data capability pair,
+widening PCC back to unbounded as part of its own real narrowing logic)
+— the exact pattern `vc_pcc_bounds.S`/`vc_ocinvoke.S` (post-Milestone-19
+fix) already prove works. Milestone 21's own generic-trap PCC-reset fix
+means a stray cross-boundary `OCJALR` at least fails safely and
+recoverably now (reaches a real trap handler) rather than hanging the
+way it would have before that fix existed — but it still fails, by
+design, not by oversight.
+
+**Practical implication for future OS/runtime work on top of Veda-Core**
+(the exact context this scope boundary matters for): a compartment's own
+internal subroutine calls may safely use `OCJALR`-protected returns; the
+compartment's own eventual exit back to its invoker must use a second,
+real `OCInvoke`, never `OCJALR`. Stated here explicitly so a future
+implementer sees this as a documented, tested boundary, not something
+discovered the hard way against a real, undocumented hard-trap.
+
 ## Sources
 
 - [Sentries for control-flow integrity, CHERIoT Platform](https://cheriot.org/isa/ibex/2024/06/26/sentries-cfi.html)
