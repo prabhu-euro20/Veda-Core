@@ -240,22 +240,8 @@ bash veda-core/compiler/run_veda_demo_tests.sh
 
 ### Debugging with real capability-register visibility
 
-```bash
-SIM=toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
-GDB=toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-gdb
-CFG=veda-core/sail_tests/veda_test_sail.json
-
-$SIM --config $CFG --gdbstub 9998 /tmp/veda_demo_linked_list.elf &
-$GDB -ex "target remote :9998"
-```
-
-Inside `gdb`, ordinary commands work (`break`, `continue`, `step`,
-`info registers`) plus Veda-Core's own 16 capability registers are
-directly visible: `info registers c0 c0_tag` shows the real, live
-128-bit packed capability and its out-of-band tag bit, verified against
-an independent second read path (`cgetbase`/`cgetlen`/`cgetperm`/
-`cgettag`) matching byte-for-byte.
-
-Full detail on every step above, including two real bugs found and
-fixed during original development (not glossed over): `TOOLCHAIN_MILESTONE_{2,3,4,9}_RESULTS.md`.
+Writing your own C program against Veda-Core, building it with the real toolchain, running it, and
+debugging a real hardware trap yourself (capability-register visibility, and why GDB alone can't
+show `mcause`/`mtval`) -- full, real, copy-pasteable walkthrough:
+`veda-core/DEVELOPER_WORKFLOW_GUIDE.md`.
 
