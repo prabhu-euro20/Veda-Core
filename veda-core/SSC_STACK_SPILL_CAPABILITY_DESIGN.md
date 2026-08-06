@@ -141,6 +141,40 @@ New tests, each proving a distinct, named property:
 - `vc_ssc_oob_neg.S`: SSC gets the identical real spatial bounds check every other Veda-Core
   capability register already gets (Bounds Violation, `mcause=0x18`/`mtval=0xA1`).
 
+## Cross-thread isolation — done 2026-08-07, empirically re-verified, not just closed by construction
+
+The design section's own point 3 argued the review's Finding #4 (per-thread SSC save/restore) is
+closed *for free*, by construction: `runtime/veda_sched_asm.S`'s own `do_resume` path already ends
+in a real `OCRETURN`, which this milestone's own fix already clears SSC on. That argument was
+correct, but was code-inspection only — this closes it empirically instead, matching this
+project's own "prove it, don't assert it" standard for every other real security property.
+
+`sail_tests/vc_ssc_cross_thread_isolation.S` / `rtl/sim/veda_smoke_ssc_cross_thread.S`: a direct
+copy of the already-proven 2-thread cooperative scheduler (Minimal OS Kernel Milestone C), with two
+minimal, targeted additions: `THREAD_A` binds a real object into SSC on its own first entry
+(standing in for "Thread A's own private stack data"); `THREAD_B`, on its own first entry — reached
+only after `THREAD_A` has already yielded at least once, crossing back through the switcher's own
+`OCRETURN` — reads SSC back and asserts it is genuinely untagged. If `OCRETURN` did **not** clear
+SSC, `THREAD_B` would instead find `THREAD_A`'s own SSC-bound capability still live and readable —
+the exact leak class the independent design review found in the first place, now proven closed
+across a genuine cooperative-scheduler thread switch, not just a single `OCInvoke` crossing.
+
+**A real bug found and fixed while writing this test, via the identical `sail_riscv_sim` trace
+debugging discipline used throughout this milestone**: the first draft used `c9` (the scheduler's
+own permanent return-sentry *source* register, needed later by `invoke_scheduler`'s own
+`csealentry c10, c9`) as the throwaway "discard" destination for `THREAD_A`'s own `OSpecialRW` call
+— silently clobbering it. The trace pinpointed the exact failure precisely: a Tag Violation at
+`scheduler_entry`'s own `ocreturn c10`, `cap_idx=10`, because `c10` was minted from an already-
+corrupted `c9`. Fixed by using `c1` (sealed `DATA_A`, confirmed genuinely dead after the initial
+`OCInvoke` into `THREAD_A` already succeeded) instead — the identical "verify a register is truly
+unused before reusing it, don't assume" lesson this whole project has learned repeatedly.
+
+**Verification**: Sail — `sail_tests/run_veda_selfcheck_tests.sh`: **58/58 passed** (57 + 1 new),
+zero regressions. RTL — `rtl/run_veda_smoke_test.sh`: **46/46 passed** (45 + 1 new); the RTL test
+passed on the first real functional attempt (the `c9`-clobber bug was already caught and fixed on
+the Sail side first, per this project's own Sail-then-RTL sequencing). `rtl/run_act4_tests.sh`:
+**51/51 passed, 0 failed, 0 timed out**, zero regressions.
+
 ## RTL mirror — done 2026-08-06, same day
 
 Mirrored into `rtl/veda_core.tlv`, field-for-field from the already-verified Sail side, mechanical
@@ -168,6 +202,7 @@ new tests at all; found and fixed by locating `run_act4_tests.sh`'s own real
 The real LLVM codegen mode that would let ordinary `clang` automatically target SSC (a real,
 separate, substantial piece of future toolchain work — the mechanics are reusable from the
 existing SoftBound-style pass, but `alloca` recognition and stack-slot Object_ID derivation are
-wholly unbuilt); a dedicated, empirical cross-thread SSC-isolation test (closed by construction per
-the design section's point 3, not yet independently re-verified with its own test, in either Sail
-or RTL).
+wholly unbuilt). This is now the only real, honestly-named gap left open by this milestone — every
+other property named in the design section (the review's Finding #1 leak, the whole-region-not-
+frame-level isolation scope, and the review's Finding #4 cross-thread concern) has been empirically
+verified in both Sail and RTL, not merely argued or closed by construction.

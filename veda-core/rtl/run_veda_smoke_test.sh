@@ -277,6 +277,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_oob.vvp" "$SIM/veda_core.sv" "$SIM/tb
 echo "==> Simulating (SSC OOB)"
 vvp "$SIM/sim_ssc_oob.vvp" +elf_hex="$SIM/veda_smoke_ssc_oob.hex"
 
+echo "==> SSC: Compiling (cross-thread isolation via the real scheduler)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_cross_thread.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_ssc_cross_thread.sv"
+echo "==> Simulating (SSC cross-thread isolation)"
+vvp "$SIM/sim_ssc_cross_thread.vvp" +elf_hex="$SIM/veda_smoke_ssc_cross_thread.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
