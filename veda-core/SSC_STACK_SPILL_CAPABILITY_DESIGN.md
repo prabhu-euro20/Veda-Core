@@ -141,11 +141,33 @@ New tests, each proving a distinct, named property:
 - `vc_ssc_oob_neg.S`: SSC gets the identical real spatial bounds check every other Veda-Core
   capability register already gets (Bounds Violation, `mcause=0x18`/`mtval=0xA1`).
 
+## RTL mirror — done 2026-08-06, same day
+
+Mirrored into `rtl/veda_core.tlv`, field-for-field from the already-verified Sail side, mechanical
+and low-risk (RTL already had the identical ODA/TSC dual-selector pattern to extend a third time):
+
+- `$veda_ospecialrw_scr_is_ssc` (`scr_sel == 5'b00010`), extending the existing single-boolean
+  `scr_is_tsc` mux chain (8 fields × 2 real sites — the persistent-register write-select and the
+  `cd`-readback mux — 16 occurrences total) to a genuine 3-way `tsc ? ... : ssc ? ... : oda`
+  selection, done via a systematic `sed` transform verified against a full diff before and after,
+  not sixteen independent hand-edits.
+- A new `$veda_ssc_*` 8-field persistent-register block, structurally identical to ODA/TSC's own.
+- `VEDA_OCINVOKE` and `VEDA_OCRETURN`'s own execute logic each gained one new line
+  (`$veda_ssc_tag = ... ? 1'b0 : ...`), mirroring the Sail side's identical fix exactly.
+
+**Verification**: `rtl/run_veda_smoke_test.sh`: **45/45 passed** (41 pre-existing + 4 new), zero
+regressions. `rtl/run_act4_tests.sh`: **51/51 passed, 0 failed, 0 timed out**, zero regressions.
+All 4 new RTL tests (`veda_smoke_ssc_roundtrip`, `_ocinvoke_clear`, `_spill_reload`, `_oob`,
+mirroring the 4 Sail tests exactly) **passed on the first real functional attempt** — the only
+issue hit was a build-process gap (the `.hex` files `$readmemh` needs weren't being generated for
+new tests at all; found and fixed by locating `run_act4_tests.sh`'s own real
+`objcopy -O verilog`-based pattern and applying it, not a logic bug in the RTL mirror itself).
+
 ## Not yet built
 
-RTL mirror (Sail-first sequencing, matching every prior milestone); the real LLVM codegen mode
-that would let ordinary `clang` automatically target SSC (a real, separate, substantial piece of
-future toolchain work — the mechanics are reusable from the existing SoftBound-style pass, but
-`alloca` recognition and stack-slot Object_ID derivation are wholly unbuilt); a dedicated,
-empirical cross-thread SSC-isolation test (closed by construction per point 3 above, not yet
-independently re-verified with its own test).
+The real LLVM codegen mode that would let ordinary `clang` automatically target SSC (a real,
+separate, substantial piece of future toolchain work — the mechanics are reusable from the
+existing SoftBound-style pass, but `alloca` recognition and stack-slot Object_ID derivation are
+wholly unbuilt); a dedicated, empirical cross-thread SSC-isolation test (closed by construction per
+the design section's point 3, not yet independently re-verified with its own test, in either Sail
+or RTL).

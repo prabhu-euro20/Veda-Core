@@ -257,6 +257,26 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m23_scheduler.vvp" "$SIM/veda_core.sv" "$
 echo "==> Simulating (Milestone 23 cooperative scheduler)"
 vvp "$SIM/sim_m23_scheduler.vvp" +elf_hex="$SIM/veda_smoke_m23_scheduler.hex"
 
+echo "==> SSC: Compiling (Stack-Spill Capability round-trip, third SCR independent of ODA/TSC)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_roundtrip.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_ssc_roundtrip.sv"
+echo "==> Simulating (SSC roundtrip)"
+vvp "$SIM/sim_ssc_roundtrip.vvp" +elf_hex="$SIM/veda_smoke_ssc_roundtrip.hex"
+
+echo "==> SSC: Compiling (OCInvoke clears SSC on every compartment-boundary crossing)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_ocinvoke_clear.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_ssc_ocinvoke_clear.sv"
+echo "==> Simulating (SSC OCInvoke clear)"
+vvp "$SIM/sim_ssc_ocinvoke_clear.vvp" +elf_hex="$SIM/veda_smoke_ssc_ocinvoke_clear.hex"
+
+echo "==> SSC: Compiling (real spill/reload sequence inside a compartment)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_spill_reload.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_ssc_spill_reload.sv"
+echo "==> Simulating (SSC spill/reload)"
+vvp "$SIM/sim_ssc_spill_reload.vvp" +elf_hex="$SIM/veda_smoke_ssc_spill_reload.hex"
+
+echo "==> SSC: Compiling (out-of-bounds access, real Bounds Violation)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_oob.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_ssc_oob.sv"
+echo "==> Simulating (SSC OOB)"
+vvp "$SIM/sim_ssc_oob.vvp" +elf_hex="$SIM/veda_smoke_ssc_oob.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

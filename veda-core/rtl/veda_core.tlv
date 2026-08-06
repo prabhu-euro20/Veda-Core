@@ -1356,7 +1356,7 @@
                    $ocinvoke_wr_en   ? 1'b1 :
                    // OSpecialRW's own `cd` = the ODA's Tag from BEFORE
                    // this instruction's own write to it.
-                   $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_tag : |cpu>>1$veda_oda_tag) :
+                   $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_tag : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_tag : |cpu>>1$veda_oda_tag) :
                    $csealentry_wr_en ? |cpu>>1$veda_csealentry_ok :
                                        $RETAIN;
             $object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
@@ -1375,7 +1375,7 @@
                                // other write source above, which all
                                // either come from the ODT or from cs1.
                                $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_object_id :
-                               $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_object_id : |cpu>>1$veda_oda_object_id) :
+                               $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_object_id : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_object_id : |cpu>>1$veda_oda_object_id) :
                                $csealentry_wr_en ? |cpu>>1$veda_rs1cap_object_id :
                                                                     $RETAIN;
             $base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
@@ -1386,7 +1386,7 @@
                           ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_base :
                           $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_base :
                           $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_base :
-                          $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_base : |cpu>>1$veda_oda_base) :
+                          $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_base : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_base : |cpu>>1$veda_oda_base) :
                           $csealentry_wr_en ? |cpu>>1$veda_rs1cap_base :
                                               $RETAIN;
             $length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
@@ -1397,7 +1397,7 @@
                             ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_length :
                             $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_length :
                             $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_length :
-                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_length : |cpu>>1$veda_oda_length) :
+                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_length : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_length : |cpu>>1$veda_oda_length) :
                             $csealentry_wr_en ? |cpu>>1$veda_rs1cap_length :
                                                 $RETAIN;
             // A fresh Bind always starts at the object's own beginning
@@ -1429,7 +1429,7 @@
                             ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_offset :
                             $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_offset :
                             $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_offset :
-                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_offset : |cpu>>1$veda_oda_offset) :
+                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_offset : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_offset : |cpu>>1$veda_oda_offset) :
                             $csealentry_wr_en ? |cpu>>1$veda_rs1cap_offset :
                                                 $RETAIN;
             $perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
@@ -1438,7 +1438,7 @@
                            ($oca_wr_en || $csetbounds_wr_en || $cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_perms :
                            $oclc_wr_en ? |cpu>>1$veda_oclc_unpacked_perms :
                            $ocinvoke_wr_en ? |cpu>>1$veda_cs2_perms :
-                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_perms : |cpu>>1$veda_oda_perms) :
+                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_perms : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_perms : |cpu>>1$veda_oda_perms) :
                            $csealentry_wr_en ? |cpu>>1$veda_rs1cap_perms :
                                                                 $RETAIN;
             // A fresh Bind always carries the UNSEALED sentinel (Section
@@ -1477,7 +1477,7 @@
                            // this is a plain read-back, not an unseal --
                            // the ODA's own contents might genuinely be
                            // sealed, and `cd` must show that faithfully).
-                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_otype : |cpu>>1$veda_oda_otype) :
+                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_otype : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_otype : |cpu>>1$veda_oda_otype) :
                            // Minimal OS kernel Milestone B: VEDA_CSEALENTRY's
                            // one overridden field -- the fixed 0xFFFE
                            // (VEDA_OTYPE_SENTRY) constant, unconditionally,
@@ -1505,7 +1505,7 @@
                              ($oca_wr_en || $csetbounds_wr_en || $cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_reserved :
                              $oclc_wr_en ? |cpu>>1$veda_oclc_unpacked_reserved :
                              $ocinvoke_wr_en ? |cpu>>1$veda_cs2_reserved :
-                             $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_reserved : |cpu>>1$veda_oda_reserved) :
+                             $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_reserved : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_reserved : |cpu>>1$veda_oda_reserved) :
                              $csealentry_wr_en ? |cpu>>1$veda_rs1cap_reserved :
                                                                   $RETAIN;
 
@@ -2024,9 +2024,12 @@
          // pattern. 5'b00000 = VEDA_SCR_ODA (the pre-existing, only
          // encoding every already-shipped test still uses -- x0 in this
          // position, backward-compatible by construction); 5'b00001 =
-         // VEDA_SCR_TSC (new).
+         // VEDA_SCR_TSC; 5'b00010 = VEDA_SCR_SSC (SSC milestone --
+         // SSC_STACK_SPILL_CAPABILITY_DESIGN.md, mirrors the Sail side's
+         // own encdec_veda_scr mapping exactly).
          $veda_ospecialrw_scr_sel[4:0] = $instr[24:20];
          $veda_ospecialrw_scr_is_tsc = ($veda_ospecialrw_scr_sel == 5'b00001);
+         $veda_ospecialrw_scr_is_ssc = ($veda_ospecialrw_scr_sel == 5'b00010);
 
          // The ODA itself: a persistent capability register, structurally
          // identical to a /vreg entry but deliberately kept OUTSIDE the
@@ -2043,28 +2046,28 @@
          // the opposite selector value, so the two registers are
          // genuinely independent, never aliased.
          $veda_oda_tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
-                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_tag :
+                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_tag :
                                                                                         >>1$veda_oda_tag;
          $veda_oda_object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
-                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_object_id :
+                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_object_id :
                                                                                                      >>1$veda_oda_object_id;
          $veda_oda_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
-                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_base :
+                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_base :
                                                                                                 >>1$veda_oda_base;
          $veda_oda_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_length :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_length :
                                                                                                   >>1$veda_oda_length;
          $veda_oda_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_offset :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_offset :
                                                                                                   >>1$veda_oda_offset;
          $veda_oda_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_perms :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_perms :
                                                                                                  >>1$veda_oda_perms;
          $veda_oda_otype[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'hFFFF :
-                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_otype :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_otype :
                                                                                                  >>1$veda_oda_otype;
          $veda_oda_reserved[7:0] = (|cpu$reset || |cpu>>1$reset) ? 8'b0 :
-                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_reserved :
+                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_reserved :
                                                                                                    >>1$veda_oda_reserved;
 
          // The real, load-bearing check every OSpecialRW consumer
@@ -2107,6 +2110,50 @@
          $veda_tsc_reserved[7:0] = (|cpu$reset || |cpu>>1$reset) ? 8'b0 :
                                     (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_reserved :
                                                                                                    >>1$veda_tsc_reserved;
+
+         // The SSC (Stack-Spill Capability): SSC_STACK_SPILL_CAPABILITY_
+         // DESIGN.md's own third Special Capability Register, added to
+         // give ordinary compiled C's ABI-mandated callee-saved-register
+         // spills a real, dedicated, capability-checked register to
+         // route through instead of raw sd/ld (which Milestone 19's
+         // purecap rule unconditionally traps inside a live compartment).
+         // Structurally identical to the ODA/TSC 8-field persistent-
+         // register pattern above, mirrored field-for-field, gated by
+         // its own selector value so all three SCRs stay genuinely
+         // independent. Unlike ODA/TSC, this register is ALSO cleared
+         // by $is_veda_ocinvoke and $is_veda_ocreturn below (their own
+         // violation-gated blocks) -- deliberately NOT persistent-and-
+         // -boundary-crossing-transparent like ODA/TSC, per an
+         // independent design review's real finding (see the design
+         // doc): an SSC following ODA/TSC's own "untouched by OCInvoke"
+         // convention would let a callee compartment silently inherit
+         // full OCL.D/OCS.D access to the caller's entire stack region.
+         $veda_ssc_tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
+                          (>>1$is_veda_ocinvoke && !>>1$veda_ocinvoke_violation) ? 1'b0 :
+                          (>>1$is_veda_ocreturn && !>>1$veda_ocreturn_violation) ? 1'b0 :
+                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_tag :
+                                                                                        >>1$veda_ssc_tag;
+         $veda_ssc_object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
+                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_object_id :
+                                                                                                     >>1$veda_ssc_object_id;
+         $veda_ssc_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
+                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_base :
+                                                                                                >>1$veda_ssc_base;
+         $veda_ssc_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_length :
+                                                                                                  >>1$veda_ssc_length;
+         $veda_ssc_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_offset :
+                                                                                                  >>1$veda_ssc_offset;
+         $veda_ssc_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_perms :
+                                                                                                 >>1$veda_ssc_perms;
+         $veda_ssc_otype[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'hFFFF :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_otype :
+                                                                                                 >>1$veda_ssc_otype;
+         $veda_ssc_reserved[7:0] = (|cpu$reset || |cpu>>1$reset) ? 8'b0 :
+                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_reserved :
+                                                                                                   >>1$veda_ssc_reserved;
 
          // ─────────────────────────────────────────────────────────
          //  VEDA-CORE: NMC_ADD.{W,D} and Veda-Atomic share the same
