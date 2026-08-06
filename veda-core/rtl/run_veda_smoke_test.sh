@@ -252,6 +252,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m23_ecall_compartment.vvp" "$SIM/veda_cor
 echo "==> Simulating (Milestone 23 ECALL compartment)"
 vvp "$SIM/sim_m23_ecall_compartment.vvp" +elf_hex="$SIM/veda_smoke_m23_ecall_compartment.hex"
 
+echo "==> Milestone 23: Compiling (RTL mirror of Sail Milestone C: real cooperative scheduler)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m23_scheduler.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m23_scheduler.sv"
+echo "==> Simulating (Milestone 23 cooperative scheduler)"
+vvp "$SIM/sim_m23_scheduler.vvp" +elf_hex="$SIM/veda_smoke_m23_scheduler.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
