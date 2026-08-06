@@ -222,6 +222,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_aqrl.vvp" "$SIM/veda_core.sv" "$SIM/tb_ve
 echo "==> Simulating (aq/rl invariance)"
 vvp "$SIM/sim_aqrl.vvp" +elf_hex="$SIM/veda_smoke_aqrl_invariance.hex"
 
+echo "==> Milestone 22: Compiling (OCJALR compartment-boundary scope, RTL parity with Sail)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m22.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m22.sv"
+echo "==> Simulating (Milestone 22)"
+vvp "$SIM/sim_m22.vvp" +elf_hex="$SIM/veda_smoke_m22.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
