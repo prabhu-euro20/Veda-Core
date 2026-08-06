@@ -227,6 +227,31 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m22.vvp" "$SIM/veda_core.sv" "$SIM/tb_ved
 echo "==> Simulating (Milestone 22)"
 vvp "$SIM/sim_m22.vvp" +elf_hex="$SIM/veda_smoke_m22.hex"
 
+echo "==> Minimal OS kernel Milestone A: Compiling (TSC round-trip via OSpecialRW selector, RTL parity with Sail)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_mosA_tsc.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_mosA_tsc.sv"
+echo "==> Simulating (minimal OS kernel Milestone A)"
+vvp "$SIM/sim_mosA_tsc.vvp" +elf_hex="$SIM/veda_smoke_mosA_tsc.hex"
+
+echo "==> Minimal OS kernel Milestone B: Compiling (CSealEntry + OCRETURN, positive, RTL parity with Sail)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_mosB_sentry.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_mosB_sentry.sv"
+echo "==> Simulating (minimal OS kernel Milestone B positive)"
+vvp "$SIM/sim_mosB_sentry.vvp" +elf_hex="$SIM/veda_smoke_mosB_sentry.hex"
+
+echo "==> Minimal OS kernel Milestone B: Compiling (CSeal forgery blocked + OCRETURN tag violation, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_mosB_sentry_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_mosB_sentry_neg.sv"
+echo "==> Simulating (minimal OS kernel Milestone B negative)"
+vvp "$SIM/sim_mosB_sentry_neg.vvp" +elf_hex="$SIM/veda_smoke_mosB_sentry_neg.hex"
+
+echo "==> Milestone 23: Compiling (real ECALL support, baseline unbounded context)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m23_ecall.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m23_ecall.sv"
+echo "==> Simulating (Milestone 23 ECALL baseline)"
+vvp "$SIM/sim_m23_ecall.vvp" +elf_hex="$SIM/veda_smoke_m23_ecall.hex"
+
+echo "==> Milestone 23: Compiling (real ECALL support, from inside a live OCInvoke compartment)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m23_ecall_compartment.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m23_ecall_compartment.sv"
+echo "==> Simulating (Milestone 23 ECALL compartment)"
+vvp "$SIM/sim_m23_ecall_compartment.vvp" +elf_hex="$SIM/veda_smoke_m23_ecall_compartment.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

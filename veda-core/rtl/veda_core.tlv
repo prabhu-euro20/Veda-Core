@@ -14,8 +14,9 @@
    //  fixed Sail V-A gap).
    //
    //  All 50 RV64I encodings implemented (unchanged from the base core):
-   //  the 38 RV32I-equivalent instructions (incl. FENCE, excl. ECALL/
-   //  EBREAK, deferred) plus the 12 RV64-only *W encodings.
+   //  the 38 RV32I-equivalent instructions (incl. FENCE and, as of RTL
+   //  Milestone 23, ECALL; EBREAK still excl./deferred) plus the 12
+   //  RV64-only *W encodings.
    //
    //  Waveform signals to watch (add in Makerchip waveform panel):
    //    |cpu @0  $pc, $instr, $opcode, $funct3, $funct7, $reg_write,
@@ -668,6 +669,19 @@
          // exactly "PC = mepc", not a full mstatus.MPP/MPIE restore.
          $is_mret = ($instr == 32'h30200073);
 
+         // RTL MILESTONE 23: ECALL -- the same fixed-literal idiom as
+         // MRET above (funct12=0, rs1=rd=0, funct3=0, opcode=SYSTEM;
+         // the full 32-bit word is 0x00000073, distinct from EBREAK's
+         // 0x00100073 -- differs only in bit 20 -- and from MRET's
+         // 0x30200073). Closes a gap this project's own Milestone 21
+         // explicitly named and pre-scoped: "if and when a future
+         // milestone adds ecall... that work must wire its own new
+         // violation signal into the existing $veda_trap_taken
+         // OR-chain... Doing so would automatically and correctly get
+         // PCC-reset for free, by construction" (MILESTONE_21_RESULTS.md).
+         // EBREAK remains deferred -- not added here.
+         $is_ecall = ($instr == 32'h00000073);
+
          $is_lb  = $op_is_load && ($funct3 == 3'b000);
          $is_lh  = $op_is_load && ($funct3 == 3'b001);
          $is_lw  = $op_is_load && ($funct3 == 3'b010);
@@ -1297,6 +1311,14 @@
             // effect on the NEXT cycle.
             $ospecialrw_wr_en = |cpu>>1$is_veda_ospecialrw && !|cpu>>1$veda_ospecialrw_violation &&
                                 (|cpu>>1$veda_rd_cap == #vreg);
+            // Minimal OS kernel Milestone B: VEDA_CSEALENTRY's own write
+            // source -- same shared $veda_rd_cap position, same
+            // copy-cs1-fields-then-override-one-field skeleton CSeal
+            // already established, but the one overridden field (otype)
+            // becomes the fixed 0xFFFE constant rather than a
+            // capability-derived value.
+            $csealentry_wr_en = |cpu>>1$is_veda_csealentry &&
+                                (|cpu>>1$veda_rd_cap == #vreg);
             $tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
                    // Milestone 12: Bind/Bind-NoTrap's own success now
                    // additionally requires owner_ok -- a wrong-owner
@@ -1334,7 +1356,8 @@
                    $ocinvoke_wr_en   ? 1'b1 :
                    // OSpecialRW's own `cd` = the ODA's Tag from BEFORE
                    // this instruction's own write to it.
-                   $ospecialrw_wr_en ? |cpu>>1$veda_oda_tag :
+                   $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_tag : |cpu>>1$veda_oda_tag) :
+                   $csealentry_wr_en ? |cpu>>1$veda_csealentry_ok :
                                        $RETAIN;
             $object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
                                $bind_wr_en       ? |cpu>>1$veda_object_id :
@@ -1352,7 +1375,8 @@
                                // other write source above, which all
                                // either come from the ODT or from cs1.
                                $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_object_id :
-                               $ospecialrw_wr_en ? |cpu>>1$veda_oda_object_id :
+                               $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_object_id : |cpu>>1$veda_oda_object_id) :
+                               $csealentry_wr_en ? |cpu>>1$veda_rs1cap_object_id :
                                                                     $RETAIN;
             $base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
                           $bind_wr_en       ? |cpu>>1$veda_odt_base :
@@ -1362,7 +1386,8 @@
                           ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_base :
                           $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_base :
                           $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_base :
-                          $ospecialrw_wr_en ? |cpu>>1$veda_oda_base :
+                          $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_base : |cpu>>1$veda_oda_base) :
+                          $csealentry_wr_en ? |cpu>>1$veda_rs1cap_base :
                                               $RETAIN;
             $length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
                             $bind_wr_en       ? |cpu>>1$veda_odt_length :
@@ -1372,7 +1397,8 @@
                             ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_length :
                             $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_length :
                             $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_length :
-                            $ospecialrw_wr_en ? |cpu>>1$veda_oda_length :
+                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_length : |cpu>>1$veda_oda_length) :
+                            $csealentry_wr_en ? |cpu>>1$veda_rs1cap_length :
                                                 $RETAIN;
             // A fresh Bind always starts at the object's own beginning
             // (VEDA_CORE_SPEC.md Section 4) -- Offset isn't sourced from
@@ -1403,7 +1429,8 @@
                             ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_offset :
                             $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_offset :
                             $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_offset :
-                            $ospecialrw_wr_en ? |cpu>>1$veda_oda_offset :
+                            $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_offset : |cpu>>1$veda_oda_offset) :
+                            $csealentry_wr_en ? |cpu>>1$veda_rs1cap_offset :
                                                 $RETAIN;
             $perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
                            $bind_wr_en ? |cpu>>1$veda_odt_perms :
@@ -1411,7 +1438,8 @@
                            ($oca_wr_en || $csetbounds_wr_en || $cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_perms :
                            $oclc_wr_en ? |cpu>>1$veda_oclc_unpacked_perms :
                            $ocinvoke_wr_en ? |cpu>>1$veda_cs2_perms :
-                           $ospecialrw_wr_en ? |cpu>>1$veda_oda_perms :
+                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_perms : |cpu>>1$veda_oda_perms) :
+                           $csealentry_wr_en ? |cpu>>1$veda_rs1cap_perms :
                                                                 $RETAIN;
             // A fresh Bind always carries the UNSEALED sentinel (Section
             // 1: "otype always set to 0xFFFF... sealing only ever happens
@@ -1449,7 +1477,14 @@
                            // this is a plain read-back, not an unseal --
                            // the ODA's own contents might genuinely be
                            // sealed, and `cd` must show that faithfully).
-                           $ospecialrw_wr_en ? |cpu>>1$veda_oda_otype :
+                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_otype : |cpu>>1$veda_oda_otype) :
+                           // Minimal OS kernel Milestone B: VEDA_CSEALENTRY's
+                           // one overridden field -- the fixed 0xFFFE
+                           // (VEDA_OTYPE_SENTRY) constant, unconditionally,
+                           // mirroring CSeal's own "otype = the new seal"
+                           // pattern above but with a fixed value instead of
+                           // a capability-derived one.
+                           $csealentry_wr_en ? 16'hFFFE :
                                                                 $RETAIN;
             // Cached generation, for the staleness re-check below. OCL.C
             // restores the generation a real OCS.C actually stored --
@@ -1470,7 +1505,8 @@
                              ($oca_wr_en || $csetbounds_wr_en || $cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_reserved :
                              $oclc_wr_en ? |cpu>>1$veda_oclc_unpacked_reserved :
                              $ocinvoke_wr_en ? |cpu>>1$veda_cs2_reserved :
-                             $ospecialrw_wr_en ? |cpu>>1$veda_oda_reserved :
+                             $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_reserved : |cpu>>1$veda_oda_reserved) :
+                             $csealentry_wr_en ? |cpu>>1$veda_rs1cap_reserved :
                                                                   $RETAIN;
 
          // ─────────────────────────────────────────────────────────
@@ -1709,8 +1745,19 @@
          // mechanical bound. cs1 itself must be tagged and not already
          // sealed ("if cs1 was already sealed" -- Sail's own comment,
          // reused verbatim).
+         // Minimal OS kernel Milestone B (MILESTONE_B_RESULTS.md):
+         // `!= 16'hFFFE` added alongside the pre-existing `!= 16'hFFFF`
+         // exclusion -- the load-bearing security property for the
+         // entire sentry mechanism (VEDA_CSEALENTRY/VEDA_OCRETURN
+         // below), mirroring real CHERI's own CSeal `cursor <=
+         // cap_max_otype` bound: ordinary, software-directed sealing
+         // must never be able to forge the hardware-reserved sentry
+         // otype. Without this line, a capability sealed here with
+         // otype=0xFFFE would be indistinguishable from a genuine
+         // VEDA_CSEALENTRY-minted sentry to VEDA_OCRETURN.
          $veda_cseal_authorized = $veda_cs2_tag && !$veda_cs2_sealed && $veda_cs2_perms[8] &&
-                                   ($veda_cs2_offset < $veda_cs2_length) && ($veda_cs2_offset != 16'hFFFF);
+                                   ($veda_cs2_offset < $veda_cs2_length) &&
+                                   ($veda_cs2_offset != 16'hFFFF) && ($veda_cs2_offset != 16'hFFFE);
          $veda_cseal_ok = $veda_cseal_authorized && $veda_rs1cap_tag && !$veda_sealed;
 
          // CUnseal: mirror of CSeal's authorization -- cs2 must be live,
@@ -1723,6 +1770,38 @@
                                      $veda_sealed && ($veda_cs2_offset == $veda_rs1cap_otype) &&
                                      ($veda_cs2_offset < $veda_cs2_length);
          $veda_cunseal_ok = $veda_cunseal_authorized && $veda_rs1cap_tag;
+
+         // ─────────────────────────────────────────────────────────
+         //  Minimal OS kernel Milestone B (MILESTONE_B_RESULTS.md):
+         //  VEDA_CSEALENTRY -- term-for-term adaptation of real CHERI's
+         //  own CSealEntry (CHERI ISA spec p.215, read in full before
+         //  writing this): cd = cs1 sealed with the fixed 0xFFFE
+         //  (VEDA_OTYPE_SENTRY) constant -- no authorizing capability
+         //  operand at all, unlike CSeal/CUnseal above (real CHERI's own
+         //  text, p.101: "an ambient monotonic action, requiring no
+         //  additional permission than to have a capability bearing
+         //  Permit_Execute"). Perms (including Permit_Execute) are
+         //  carried through unchanged, neither stripped nor added --
+         //  VEDA_OCRETURN below is what actually enforces Permit_Execute,
+         //  at the point of use, matching real CHERI's own division of
+         //  labor between CSealEntry and CJALR exactly (verified against
+         //  the Sail model, veda_cap_insts.sail's own VEDA_CSEALENTRY).
+         //  funct7 = 0010101, the next genuinely free Custom-2/funct3=001
+         //  slot after OCJALR (0010100), verified directly against every
+         //  existing funct7==7'b0010... decode line in this file before
+         //  picking it. Single source operand, reusing the same shared
+         //  rs1-cap field ($veda_ocl_ocs_rs1_cap / $veda_rs1cap_*) every
+         //  other Custom-2 instruction already shares -- no new field
+         //  extraction needed.
+         // ─────────────────────────────────────────────────────────
+         $is_veda_csealentry = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010101);
+         // Soft-fail only, no hard trap -- mirrors CSeal's own $veda_cseal_ok
+         // pattern, minus any cs2/authorization term (CSealEntry takes
+         // none): an already-untagged or already-sealed cs1 can't
+         // produce a valid sentry, the same "untagged/already-sealed
+         // source can't produce a valid result" reasoning CSeal already
+         // applies.
+         $veda_csealentry_ok = $veda_rs1cap_tag && !$veda_sealed;
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 10: OCInvoke -- Veda-Core's own term-for-term
@@ -1848,6 +1927,71 @@
          $veda_ocjalr_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
 
          // ─────────────────────────────────────────────────────────
+         //  Minimal OS kernel Milestone B (MILESTONE_B_RESULTS.md):
+         //  VEDA_OCRETURN -- the actual cheap, cross-compartment-
+         //  boundary-crossing counterpart to OCJALR's own always-two-
+         //  operand design above. Deliberately a NEW opcode rather than
+         //  a sentry branch folded into OCJALR: OCJALR's own rs2 is a
+         //  fixed encoding field (folding a branch in would either still
+         //  require rs2 to be supplied unused, defeating the single-
+         //  operand premise, or make one static encoding mean two
+         //  different things depending on runtime capability contents --
+         //  this file's own convention already gives each distinct
+         //  security-relevant behavior its own funct7, e.g. OCA/
+         //  CSetBounds/CSetBoundsExact). OCJALR itself is completely
+         //  unmodified by this addition -- direct, load-bearing
+         //  preservation of RTL Milestone 22's own already-shipped,
+         //  already-tested "OCJALR cannot cross a compartment boundary"
+         //  finding (veda_smoke_m22.S).
+         //
+         //  cs1 must be a genuine VEDA_CSEALENTRY-minted sentry (otype
+         //  == 0xFFFE, a value ordinary CSeal is now hardware-blocked
+         //  from ever producing, per the hardened $veda_cseal_authorized
+         //  above) -- verified with exactly the same three checks
+         //  OCJALR's own cs1-side already performs (tag, seal-validity,
+         //  Permit_Execute), reusing the identical cause codes, but with
+         //  NO second, type-authority capability operand at all: a
+         //  sentry's own otype is self-authenticating, unlike an
+         //  arbitrary CSeal otype which always needs an explicit
+         //  CUnseal-style authority to vouch for it. Permit_Invoke is
+         //  deliberately NOT checked -- matches real CHERI's own sentry/
+         //  CJALR mechanism exactly.
+         //
+         //  On success, narrows $veda_pcc_base/$veda_pcc_length to cs1's
+         //  own Base/Length (defined further below, alongside
+         //  OCInvoke's own identical assignment) -- the actual
+         //  compartment-boundary-crossing side effect. c15 (IDC) is
+         //  deliberately left untouched (not cleared): real CJALR never
+         //  touches IDC either (only CInvoke does), and OCInvoke's own
+         //  write-back mux above already treats "install data-capability
+         //  context" and "narrow PCC" as two independently-triggered
+         //  effects, so OCRETURN adopting only the PCC half reuses a
+         //  split this file already makes internally rather than
+         //  inventing a new one.
+         //
+         //  funct7 = 0010110, the next free Custom-2/funct3=001 slot
+         //  after CSealEntry's own 0010101 above (verified by grep
+         //  against every existing user of this space before picking
+         //  it). Single source operand, reusing the same shared rs1-cap
+         //  field every other Custom-2 instruction already shares -- no
+         //  new field extraction needed. cap_idx for a trap needs no new
+         //  per-family branch in $veda_trap_cap_idx below -- its own
+         //  existing default fallback is already $veda_ocl_ocs_rs1_cap,
+         //  exactly the single operand OCRETURN has.
+         // ─────────────────────────────────────────────────────────
+         $is_veda_ocreturn = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010110);
+         $veda_ocreturn_violation = $is_veda_ocreturn && (
+            !$veda_rs1cap_tag || !$veda_sealed ||
+            ($veda_rs1cap_otype != 16'hFFFE) ||
+            !$veda_rs1cap_perms[1]);
+         $veda_ocreturn_cause[4:0] =
+            !$veda_rs1cap_tag                    ? 5'h02 :
+            !$veda_sealed                        ? 5'h03 :
+            ($veda_rs1cap_otype != 16'hFFFE)     ? 5'h03 :
+                                                    5'h11; // remaining case: cs1 not executable
+         $veda_ocreturn_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+
+         // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 11: OSpecialRW + capability-authority-gated
          //  ODT-Populate/ODT-Destroy (NEXT_STEPS_ROADMAP.md §2.5).
          //  Mirrors veda_cap_insts.sail's own VEDA_OSPECIALRW field-for-
@@ -1867,6 +2011,23 @@
          $is_veda_ospecialrw = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010011);
          $veda_ospecialrw_violation = $is_veda_ospecialrw && !$priv;
 
+         // RTL mirror of minimal OS kernel Milestone A
+         // (MINIMAL_OS_KERNEL_DESIGN.md): the SCR-selector operand
+         // veda_cap_insts.sail's own VEDA_OSPECIALRW extension added,
+         // read from the FULL 5-bit rs2 register-field position
+         // ($instr[24:20]) -- unlike every vcapidx-shaped rs2-capability
+         // operand elsewhere in this file (e.g.
+         // $veda_cseal_cunseal_rs2_cap[3:0] = $instr[23:20], a 0-spacer
+         // + 4-bit split), Sail's own encdec_veda_scr mapping consumes
+         // the entire 5-bit field directly, confirmed by re-reading that
+         // mapping before writing this, not assumed from the vcap
+         // pattern. 5'b00000 = VEDA_SCR_ODA (the pre-existing, only
+         // encoding every already-shipped test still uses -- x0 in this
+         // position, backward-compatible by construction); 5'b00001 =
+         // VEDA_SCR_TSC (new).
+         $veda_ospecialrw_scr_sel[4:0] = $instr[24:20];
+         $veda_ospecialrw_scr_is_tsc = ($veda_ospecialrw_scr_sel == 5'b00001);
+
          // The ODA itself: a persistent capability register, structurally
          // identical to a /vreg entry but deliberately kept OUTSIDE the
          // CRF (VEDA_CORE_SPEC.md's own reasoning: it plays a genuinely
@@ -1875,29 +2036,35 @@
          // capability register any Object-Bind/OCL/OCS/etc. can target).
          // Same real persistent-signal idiom already proven for
          // $mtvec/$mepc/$mcause/$mtval (Milestone 9), not a new one.
+         // Minimal OS kernel Milestone A addition: write now also
+         // requires the selector to specifically pick ODA (previously
+         // unconditional whenever OSpecialRW fired at all, back when
+         // ODA was the only SCR) -- TSC below mirrors this exactly with
+         // the opposite selector value, so the two registers are
+         // genuinely independent, never aliased.
          $veda_oda_tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
-                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_tag :
+                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_tag :
                                                                                         >>1$veda_oda_tag;
          $veda_oda_object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
-                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_object_id :
+                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_object_id :
                                                                                                      >>1$veda_oda_object_id;
          $veda_oda_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
-                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_base :
+                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_base :
                                                                                                 >>1$veda_oda_base;
          $veda_oda_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_length :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_length :
                                                                                                   >>1$veda_oda_length;
          $veda_oda_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_offset :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_offset :
                                                                                                   >>1$veda_oda_offset;
          $veda_oda_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_perms :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_perms :
                                                                                                  >>1$veda_oda_perms;
          $veda_oda_otype[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'hFFFF :
-                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_otype :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_otype :
                                                                                                  >>1$veda_oda_otype;
          $veda_oda_reserved[7:0] = (|cpu$reset || |cpu>>1$reset) ? 8'b0 :
-                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation) ? >>1$veda_rs1cap_reserved :
+                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_reserved :
                                                                                                    >>1$veda_oda_reserved;
 
          // The real, load-bearing check every OSpecialRW consumer
@@ -1908,6 +2075,38 @@
          // by any real instruction).
          $veda_oda_sealed = ($veda_oda_otype != 16'hFFFF);
          $veda_oda_authorized = $veda_oda_tag && !$veda_oda_sealed && $veda_oda_perms[7];
+
+         // The TSC (Trusted Stack Capability): minimal OS kernel
+         // Milestone A's own second Special Capability Register, term-
+         // for-term adapted from real CHERIoT's own `mtdc`
+         // (MINIMAL_OS_KERNEL_DESIGN.md). Structurally identical to the
+         // ODA's own 8-field persistent-register pattern immediately
+         // above, mirrored field-for-field, gated by the opposite
+         // selector value so the two registers are never aliased.
+         $veda_tsc_tag = (|cpu$reset || |cpu>>1$reset) ? 1'b0 :
+                          (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_tag :
+                                                                                        >>1$veda_tsc_tag;
+         $veda_tsc_object_id[22:0] = (|cpu$reset || |cpu>>1$reset) ? 23'b0 :
+                                      (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_object_id :
+                                                                                                     >>1$veda_tsc_object_id;
+         $veda_tsc_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
+                                 (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_base :
+                                                                                                >>1$veda_tsc_base;
+         $veda_tsc_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_length :
+                                                                                                  >>1$veda_tsc_length;
+         $veda_tsc_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                   (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_offset :
+                                                                                                  >>1$veda_tsc_offset;
+         $veda_tsc_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_perms :
+                                                                                                 >>1$veda_tsc_perms;
+         $veda_tsc_otype[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'hFFFF :
+                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_otype :
+                                                                                                 >>1$veda_tsc_otype;
+         $veda_tsc_reserved[7:0] = (|cpu$reset || |cpu>>1$reset) ? 8'b0 :
+                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_reserved :
+                                                                                                   >>1$veda_tsc_reserved;
 
          // ─────────────────────────────────────────────────────────
          //  VEDA-CORE: NMC_ADD.{W,D} and Veda-Atomic share the same
@@ -2089,13 +2288,29 @@
          // branch of its own (unlike the PCC-family CSRs, nothing else
          // ever writes it), so its own write-gating expression below
          // gets an explicit, separate guard instead.
+         // Minimal OS kernel Milestone B: $veda_ocreturn_violation joins
+         // the same combined trap-taken family -- its own cap_idx needs
+         // NO new branch in $veda_trap_cap_idx below (single operand,
+         // already the shared $veda_ocl_ocs_rs1_cap position, exactly
+         // the existing default fallback).
+         // RTL Milestone 23: $is_ecall joins the same combined
+         // trap-taken family -- unlike every other term here (all
+         // conditional security violations), ecall is unconditional by
+         // design: executing it always traps, no separate violation
+         // gate needed. No same-cycle collision risk with any other
+         // term -- every other term gates on Custom-0/1/2 opcodes or
+         // is_load/is_store/CSRRW/CSRRS, all disjoint from SYSTEM
+         // opcode; $veda_pcc_violation forces $instr to a NOP before
+         // decode, so it's provably mutually exclusive with $is_ecall
+         // needing an exact literal match.
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
-                             $veda_ocjalr_violation ||
+                             $veda_ocjalr_violation || $veda_ocreturn_violation ||
                              $veda_bind_trap || $veda_pcc_violation ||
-                             $veda_purecap_violation || $veda_csr_escape_violation;
+                             $veda_purecap_violation || $veda_csr_escape_violation ||
+                             $is_ecall;
          $veda_trap_cause[4:0] =
             $veda_ocl_violation       ? $veda_ocl_cause :
             $veda_ocs_violation       ? $veda_ocs_cause :
@@ -2106,6 +2321,7 @@
             $veda_atomic_violation    ? $veda_atomic_cause :
             $veda_ocinvoke_violation  ? $veda_ocinvoke_cause :
             $veda_ocjalr_violation    ? $veda_ocjalr_cause :
+            $veda_ocreturn_violation  ? $veda_ocreturn_cause :
             $veda_bind_trap           ? $veda_bind_cause :
                                         5'b0;
          $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation ? $veda_ocinvoke_cap_idx :
@@ -2208,7 +2424,14 @@
                          // exactly (a stronger, more consistent response
                          // than a silent no-op, per that milestone's own
                          // reasoning).
-                         (>>1$veda_trap_taken) ? (>>1$veda_csr_escape_violation ? 64'h02 : 64'h18) :
+                         // RTL Milestone 23: ecall gets the real,
+                         // standard RISC-V privileged-spec mcause for
+                         // "Environment call from M-mode" (0x0B=11) --
+                         // not an invented Veda-specific code, and the
+                         // only possible value since this core only
+                         // ever runs M-mode.
+                         (>>1$veda_trap_taken) ? (>>1$veda_csr_escape_violation ? 64'h02 :
+                                                   >>1$is_ecall ? 64'h0B : 64'h18) :
                                                   >>1$mcause;
          $mtval[63:0] = $reset ? 64'b0 :
                         // veda_xtval(cap_idx, cause) = zero_extend(cap_idx5
@@ -2241,9 +2464,16 @@
                         // offending CSRRW/CSRRS itself) -- rather than a
                         // cap_idx/cause pair, since this is not a
                         // Veda-specific violation family at all.
+                        // RTL Milestone 23: mtval=0 for ecall, the real
+                        // RISC-V spec convention (no fault-address info
+                        // applies) -- the pre-existing default fallback
+                        // below is built from $veda_trap_cap_idx/_cause,
+                        // which ecall never populates, so it needs its
+                        // own explicit branch rather than falling through.
                         (>>1$veda_trap_taken) ? (>>1$veda_csr_escape_violation ? {32'b0, >>1$instr}
                                                   : >>1$veda_purecap_violation ? {54'b0, 5'b10001, 5'b00111}
                                                   : >>1$veda_pcc_violation ? {54'b0, 5'b10000, 5'b00001}
+                                                  : >>1$is_ecall ? 64'b0
                                                                          : {55'b0, >>1$veda_trap_cap_idx, >>1$veda_trap_cause}) :
                                                  >>1$mtval;
 
@@ -2272,14 +2502,24 @@
          //  advance-before-mret since Milestone 9, carried forward here
          //  rather than inventing an automatic mechanism); (4) retain.
          // ─────────────────────────────────────────────────────────
+         // Minimal OS kernel Milestone B: a successful VEDA_OCRETURN
+         // joins OCInvoke at the same priority tier -- both narrow PCC
+         // to cs1's own Base/Length on their own real success path, the
+         // actual compartment-boundary-crossing side effect. Structurally
+         // identical branches (both read $veda_rs1cap_base/_length, the
+         // shared rs1-capability signal every Custom-2 instruction here
+         // already reads), just gated by a different instruction/
+         // violation pair.
          $veda_pcc_base[31:0] = $reset ? 32'b0 :
                                  (>>1$veda_trap_taken) ? 32'b0 :
                                  (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_base :
+                                 (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_base :
                                  (>>1$csr_write_en && >>1$csr_is_veda_pcc_base) ? >>1$csr_wdata[31:0] :
                                                                                    >>1$veda_pcc_base;
          $veda_pcc_length[15:0] = $reset ? 16'hFFFF :
                                    (>>1$veda_trap_taken) ? 16'hFFFF :
                                    (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_length :
+                                   (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[15:0] :
                                                                                        >>1$veda_pcc_length;
          $veda_mepcc_base[31:0] = $reset ? 32'b0 :
@@ -2477,14 +2717,20 @@
          // unconditional-hardware-redirect shape OCInvoke's own jump
          // above already established (a failing OCJALR is already
          // routed to $veda_trap_taken, never reaches here).
+         // Minimal OS kernel Milestone B: VEDA_OCRETURN's own real jump
+         // joins the same unconditional-hardware-redirect family as
+         // OCInvoke/OCJALR above (a failing OCRETURN is already routed
+         // to $veda_trap_taken, never reaches here).
          $pc_src = $veda_trap_taken || $is_mret ||
                    ($is_veda_ocinvoke && !$veda_ocinvoke_violation) ||
                    ($is_veda_ocjalr && !$veda_ocjalr_violation) ||
+                   ($is_veda_ocreturn && !$veda_ocreturn_violation) ||
                    $is_jal || $is_jalr || $branch_taken;
          $alt_pc[63:0] = $veda_trap_taken ? $mtvec :
                           $is_mret         ? $mepc :
                           ($is_veda_ocinvoke && !$veda_ocinvoke_violation) ? $veda_ocinvoke_target :
                           ($is_veda_ocjalr && !$veda_ocjalr_violation) ? $veda_ocjalr_target :
+                          ($is_veda_ocreturn && !$veda_ocreturn_violation) ? $veda_ocreturn_target :
                           $is_jal ? $jal_target : $is_jalr ? $jalr_target : $branch_target;
 
          // ─────────────────────────────────────────────────────────
