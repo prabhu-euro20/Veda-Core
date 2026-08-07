@@ -199,10 +199,19 @@ new tests at all; found and fixed by locating `run_act4_tests.sh`'s own real
 
 ## Not yet built
 
-The real LLVM codegen mode that would let ordinary `clang` automatically target SSC (a real,
-separate, substantial piece of future toolchain work — the mechanics are reusable from the
-existing SoftBound-style pass, but `alloca` recognition and stack-slot Object_ID derivation are
-wholly unbuilt). This is now the only real, honestly-named gap left open by this milestone — every
-other property named in the design section (the review's Finding #1 leak, the whole-region-not-
-frame-level isolation scope, and the review's Finding #4 cross-thread concern) has been empirically
-verified in both Sail and RTL, not merely argued or closed by construction.
+**Built since this section was first written**: `__attribute__((veda_compartment))`
+(TOOLCHAIN_MILESTONE_11_RESULTS.md) makes ordinary `clang` automatically route a compiled
+function's own ABI-mandated *callee-saved-register* prologue/epilogue spills through SSC — the
+literal, direct closure of Milestone 10's own finding, empirically re-verified end-to-end (a real
+compiled C function runs inside a live `OCInvoke`-bound compartment with zero purecap traps, while
+an identical un-attributed build still traps for exactly `VEDA_CAUSE_PURECAP_VIOLATION`).
+
+**Still genuinely open**: `alloca`-based C locals — deriving a stack slot's Object_ID/offset at the
+IR level remains wholly unbuilt (the existing SoftBound-style pass, `VedaShadowPropagation.cpp`,
+has zero `AllocaInst` recognition today) — a real, separate, substantial piece of future toolchain
+work, architecturally distinct from the callee-saved-spill mechanism Milestone 11 closed (backend
+`RISCVFrameLowering`/`PrologEpilogInserter` machinery vs. IR-level `alloca` tracking — two different
+LLVM subsystems, confirmed via direct source read before Milestone 11 began). Also still open:
+globals/statics inside a compartment function, and nested `veda_compartment`→`veda_compartment`
+calls remain architecturally correct but untested by any real nested-call test case — both named
+explicitly in TOOLCHAIN_MILESTONE_11_RESULTS.md's own "Not yet built" section.
