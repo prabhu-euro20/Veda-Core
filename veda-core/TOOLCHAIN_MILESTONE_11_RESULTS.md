@@ -146,11 +146,17 @@ Full regression, zero regressions: `sail_tests/run_veda_selfcheck_tests.sh` 58/5
   `sd`/`ld` in the first place; a real, honest edge case, not a bypass of the rule.)
 - **FPR/vector callee-saved spills through SSC** — GPR-only (`ra`, `s0`-`s11`); RVV CSI stays on
   its existing path.
-- **Nested `veda_compartment`→`veda_compartment` calls** — the `SP + offset` fix above makes this
-  architecturally correct (each frame's own `SP` genuinely differs), but no test in this milestone
-  actually exercises a real nested call between two `veda_compartment`-attributed functions;
-  flagged honestly as unverified-by-test, not merely unverified-by-construction, matching the
-  precedent this project already set for SSC's own cross-thread isolation gap.
+- ~~Nested `veda_compartment`→`veda_compartment` calls~~ — **closed, same day.**
+  `compiler/veda_compartment_nested_demo.c`: `outer_fn` (5 iterations) calls `inner_fn` — both
+  `noinline`, both pin a local to the same physical register (`x20`/`s4`), the exact scenario the
+  `SP + offset` fix exists to disambiguate (confirmed via `llc` output: both functions independently
+  emit `addi t1, sp, -48` / `ocs.d c15, t1, s4` for their own `s4` spill, at genuinely different
+  real `sp` values since `inner_fn` runs one call-frame deeper). Expected result is precisely
+  predictable (`1` doubled 5 times `= 32`), not merely "doesn't crash" — any aliasing between the
+  two frames' spill slots would almost certainly produce a wrong value. Ran under `sail_riscv_sim`:
+  `SUCCESS`, exact result `32`, zero purecap traps. Mutation-tested the check itself (temporarily
+  expecting `33`): correctly reports `FAILURE`, confirming the pass/fail logic is non-vacuous.
+  `compiler/veda_compartment_nested_entry.S` / `run_veda_compartment_nested_test.sh`.
 - **`SelectionDAG`-pattern-based `OCL.D`/`OCS.D` selection for arbitrary `*p` dereferences** —
   unrelated, unattempted; this milestone is scoped exclusively to the frame-lowering-level
   callee-saved-register spill mechanism.
