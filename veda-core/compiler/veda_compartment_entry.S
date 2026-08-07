@@ -94,7 +94,7 @@ landing_pad:
     .insn r 0x5b, 0x1, 0x13, x14, x15, x2  # ospecialrw c14(discard-old), ssc, c15 -- SSC := c15
 
     # -- Real, load-bearing architectural convention this milestone
-    #    requires (see VEDA_COMPARTMENT_TOOLCHAIN_MILESTONE_11_RESULTS.md):
+    #    requires (see TOOLCHAIN_MILESTONE_11_RESULTS.md):
     #    veda_check_access computes real_loc = cap.Base + offset
     #    (veda_ocl_insts.sail, re-verified before writing this), and
     #    cap.Length is only 16 bits -- far too narrow for SP's ordinary,

@@ -8,7 +8,7 @@
 // OCInvoke-bound compartment -- the real problem this milestone (`veda_compartment`
 // + SSC) exists to close.
 //
-// Compiled two ways for direct comparison (see run_veda_compartment_demo_test.sh):
+// Compiled two ways for direct comparison (see run_veda_compartment_test.sh):
 //   - WITHOUT __attribute__((veda_compartment)): reproduces M10's exact failure,
 //     kept as a documented negative control that still traps.
 //   - WITH the attribute: the identical spill is redirected through OCS.D/OCL.D
