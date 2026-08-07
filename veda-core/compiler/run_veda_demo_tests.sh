@@ -13,6 +13,7 @@ LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
 CLANG=$LLVM/clang
 MC=$LLVM/llvm-mc
 LLVM_CONFIG=$LLVM/llvm-config
+LLC=$LLVM/llc
 LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
 SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=../sail_tests/veda_test_sail.json
@@ -21,6 +22,7 @@ PLUGIN=/tmp/VedaShadowPropagation.so
 
 CC_FLAGS="--target=riscv64 -march=rv64i_zicsr -mno-relax -mcmodel=medany -ffreestanding -fno-builtin -nostdlib -O0 -I."
 MC_FLAGS="-triple=riscv64 -mattr=+xveda -filetype=obj -I../sail_tests"
+LLC_FLAGS="-mtriple=riscv64 -mattr=+xveda -O1 -filetype=obj"
 
 # Build the plugin (system clang++-21 as compiler, our own checkout's
 # headers for ABI match with our own custom-built opt/clang -- see
@@ -30,9 +32,23 @@ if ! clang++-21 $CXXFLAGS -fPIC -shared -o "$PLUGIN" VedaShadowPropagation.cpp; 
   echo "plugin build FAILED"; exit 1
 fi
 
-# Shared runtime objects.
-"$CLANG" $CC_FLAGS -c -o /tmp/demo_veda_compiler_rt.o veda_compiler_rt.c || { echo "veda_compiler_rt.c failed"; exit 1; }
-"$CLANG" $CC_FLAGS -c -o /tmp/demo_veda_rt.o ../runtime/veda_rt.c || { echo "veda_rt.c failed"; exit 1; }
+# Toolchain Milestone 12: veda_compiler_rt.c/veda_rt.c now ALSO carry
+# __attribute__((veda_compartment)) on their own stack-helper functions
+# (see those files' own header comments) -- compiling them via the old
+# single-stage `clang -c` (with no -mattr=+xveda reaching the backend)
+# crashes RISCVAsmPrinter outright on any veda_compartment-attributed
+# function's own C15 prologue codegen, a real regression this milestone's
+# own full-regression pass found empirically. Fixed by switching both to
+# the same two-stage pipeline run_veda_alloca_protect_test.sh (Toolchain
+# Milestone 12) already established: `clang -S -emit-llvm` then
+# `llc -mattr=+xveda -filetype=obj`. Safe for every OTHER (non-attributed)
+# function in these same translation units too -- -mattr=+xveda only
+# enables the backend to emit XVeda instructions when needed, never forces
+# it.
+"$CLANG" $CC_FLAGS -S -emit-llvm -o /tmp/demo_veda_compiler_rt.ll veda_compiler_rt.c || { echo "veda_compiler_rt.c IR emission failed"; exit 1; }
+"$LLC" $LLC_FLAGS -o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_compiler_rt.ll || { echo "veda_compiler_rt.c llc lowering failed"; exit 1; }
+"$CLANG" $CC_FLAGS -S -emit-llvm -o /tmp/demo_veda_rt.ll ../runtime/veda_rt.c || { echo "veda_rt.c IR emission failed"; exit 1; }
+"$LLC" $LLC_FLAGS -o /tmp/demo_veda_rt.o /tmp/demo_veda_rt.ll || { echo "veda_rt.c llc lowering failed"; exit 1; }
 "$MC" $MC_FLAGS -o /tmp/demo_veda_rt_asm.o ../runtime/veda_rt_asm.S || { echo "veda_rt_asm.S failed"; exit 1; }
 "$MC" $MC_FLAGS -o /tmp/demo_crt0.o ../runtime/crt0.S || { echo "crt0.S failed"; exit 1; }
 

@@ -12,6 +12,7 @@ cd "$(dirname "$0")"
 LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
 MC=$LLVM/llvm-mc
 CLANG=$LLVM/clang
+LLC=$LLVM/llc
 LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
 SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=../sail_tests/veda_test_sail.json
@@ -20,6 +21,7 @@ INC=../sail_tests
 
 CC_FLAGS="--target=riscv64 -march=rv64i_zicsr -mno-relax -mcmodel=medany -ffreestanding -fno-builtin -nostdlib -O1 -Wall -I."
 MC_FLAGS="-triple=riscv64 -mattr=+xveda -filetype=obj -I$INC"
+LLC_FLAGS="-mtriple=riscv64 -mattr=+xveda -O1 -filetype=obj"
 
 pass_count=0
 fail_count=0
@@ -50,15 +52,25 @@ run_one() {
 "$MC" $MC_FLAGS -o /tmp/rt_veda_rt_asm.o veda_rt_asm.S || { echo "veda_rt_asm.S assemble failed"; exit 1; }
 "$MC" $MC_FLAGS -o /tmp/rt_trap_catcher.o veda_rt_trap_catcher.S || { echo "veda_rt_trap_catcher.S assemble failed"; exit 1; }
 
+# Toolchain Milestone 12: veda_rt.c now ALSO carries
+# __attribute__((veda_compartment)) on veda_ocl_stack_d/veda_ocs_stack_d
+# (see that file's own header comment) -- single-stage `clang -c` (no
+# -mattr=+xveda reaching the backend) crashes RISCVAsmPrinter on those
+# functions' own C15 prologue codegen, the identical real regression
+# compiler/run_veda_demo_tests.sh's own fix already addressed. Fixed the
+# same way: `clang -S -emit-llvm` then `llc -mattr=+xveda -filetype=obj`.
+#
 # Positive test: default VEDA_RT_MAX_OBJECTS=8.
-"$CLANG" $CC_FLAGS -c -o /tmp/rt_veda_rt_8.o veda_rt.c || { echo "veda_rt.c (MAX=8) compile failed"; exit 1; }
+"$CLANG" $CC_FLAGS -S -emit-llvm -o /tmp/rt_veda_rt_8.ll veda_rt.c || { echo "veda_rt.c (MAX=8) IR emission failed"; exit 1; }
+"$LLC" $LLC_FLAGS -o /tmp/rt_veda_rt_8.o /tmp/rt_veda_rt_8.ll || { echo "veda_rt.c (MAX=8) llc lowering failed"; exit 1; }
 "$CLANG" $CC_FLAGS -c -o /tmp/rt_positive_test.o veda_rt_positive_test.c || { echo "positive test compile failed"; exit 1; }
 run_one veda_rt_positive_test /tmp/rt_crt0.o /tmp/rt_veda_rt_8.o /tmp/rt_veda_rt_asm.o /tmp/rt_positive_test.o
 
 # Negative test: built with VEDA_RT_MAX_OBJECTS=1 so the one slot's real
 # retirement empties the whole pool (see veda_rt_retire_neg_test.c's own
 # header comment for why).
-"$CLANG" $CC_FLAGS -DVEDA_RT_MAX_OBJECTS=1 -c -o /tmp/rt_veda_rt_1.o veda_rt.c || { echo "veda_rt.c (MAX=1) compile failed"; exit 1; }
+"$CLANG" $CC_FLAGS -DVEDA_RT_MAX_OBJECTS=1 -S -emit-llvm -o /tmp/rt_veda_rt_1.ll veda_rt.c || { echo "veda_rt.c (MAX=1) IR emission failed"; exit 1; }
+"$LLC" $LLC_FLAGS -o /tmp/rt_veda_rt_1.o /tmp/rt_veda_rt_1.ll || { echo "veda_rt.c (MAX=1) llc lowering failed"; exit 1; }
 "$CLANG" $CC_FLAGS -DVEDA_RT_MAX_OBJECTS=1 -c -o /tmp/rt_retire_neg_test.o veda_rt_retire_neg_test.c || { echo "negative test compile failed"; exit 1; }
 run_one veda_rt_retire_neg_test /tmp/rt_crt0.o /tmp/rt_veda_rt_1.o /tmp/rt_veda_rt_asm.o /tmp/rt_trap_catcher.o /tmp/rt_retire_neg_test.o
 

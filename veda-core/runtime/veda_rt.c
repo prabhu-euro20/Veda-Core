@@ -11,6 +11,12 @@ extern uint64_t veda_odt_destroy_asm(uint64_t object_id);
 extern int veda_bind_scratch_asm(uint64_t object_id);
 extern void veda_ocl_d_scratch_asm(uint64_t offset, uint64_t *out);
 extern void veda_ocs_d_scratch_asm(uint64_t offset, uint64_t value);
+extern uint64_t veda_ocl_stack_d_scratch_asm(uint64_t region_offset,
+                                             uint64_t access_offset,
+                                             uint64_t size);
+extern void veda_ocs_stack_d_scratch_asm(uint64_t region_offset,
+                                         uint64_t access_offset,
+                                         uint64_t size, uint64_t value);
 
 static bool g_in_use[VEDA_RT_MAX_OBJECTS];
 static bool g_retired[VEDA_RT_MAX_OBJECTS];
@@ -97,5 +103,39 @@ bool veda_ocl_d(veda_obj_t obj, uint64_t offset, uint64_t *out) {
 bool veda_ocs_d(veda_obj_t obj, uint64_t offset, uint64_t value) {
   if (!veda_bind_scratch_asm(obj)) return false;
   veda_ocs_d_scratch_asm(offset, value);
+  return true;
+}
+
+// Toolchain Milestone 12: no software bind-failure path exists here --
+// c15 is already established by the compartment's own entry point (never
+// this runtime); an invalid access hard-traps inside the asm helper's
+// own OCA/CSetBounds/OCL.D-or-OCS.D sequence, matching this runtime's
+// established "let hardware enforce it" rule for the equivalent
+// heap-object case above.
+// Real, empirically-found requirement (Toolchain Milestone 12): these two
+// functions are always reached from INSIDE a live veda_compartment
+// function's own call graph, so they must themselves be
+// __attribute__((veda_compartment)) too -- M19's purecap enforcement is
+// global (tied to the veda_mode CSR, not to which function is currently
+// executing), so an ordinary (non-attributed) function's own plain-`sd`
+// `ra` spill (needed here because each function calls further into its
+// own `*_scratch_asm` helper, so `ra` cannot be tail-call-elided) hard
+// traps with VEDA_CAUSE_PURECAP_VIOLATION exactly like any other raw
+// store would. Attributing these routes that same spill through OCS.D
+// against the already-bound C15 instead -- the identical, already-proven
+// safe nested-compartment pattern Toolchain Milestone 11's own nested
+// call test (veda_compartment_nested_demo.c) already validated.
+uint64_t veda_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
+                          uint64_t size) __attribute__((veda_compartment));
+uint64_t veda_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
+                          uint64_t size) {
+  return veda_ocl_stack_d_scratch_asm(region_offset, access_offset, size);
+}
+
+bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
+                      uint64_t size, uint64_t value) __attribute__((veda_compartment));
+bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
+                      uint64_t size, uint64_t value) {
+  veda_ocs_stack_d_scratch_asm(region_offset, access_offset, size, value);
   return true;
 }

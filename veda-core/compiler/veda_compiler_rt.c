@@ -93,3 +93,34 @@ void veda_rt_ocl_d(uint32_t oid, uint64_t offset, uint64_t *out) {
 void veda_rt_ocs_d(uint32_t oid, uint64_t offset, uint64_t value) {
   (void)veda_ocs_d((veda_obj_t)oid, offset, value);
 }
+
+// Toolchain Milestone 12: pass-facing ABI for alloca-protected stack
+// locals -- no Object_ID, since the target is always the already
+// -established, persistent SSC capability in c15 (Toolchain Milestone
+// 11), never a fresh veda.bind. See VedaShadowPropagation.cpp's own
+// Phase B0 for how region_offset/access_offset/size are computed.
+// __attribute__((veda_compartment)) here too, for the identical real
+// reason veda_rt.h's own veda_ocl_stack_d/veda_ocs_stack_d now carry it
+// (see that file's header comment) -- these wrappers are reached from
+// inside a live compartment's own call graph just as directly. In THIS
+// specific pair the compiler happens to tail-call-optimize the single
+// inner call away (confirmed via trace: no stack frame, no `ra` spill at
+// all), so this attribute is not empirically load-bearing for the exact
+// demo tested here -- but relying on TCO continuing to fire is fragile
+// (opt-level/compiler-version dependent), so it is applied unconditionally
+// rather than left implicit. veda_rt_ocl_stack_d returns the loaded value
+// directly (matching veda_ocl_stack_d's own real signature, see that
+// function's header comment) -- no out-param write-back.
+uint64_t veda_rt_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
+                             uint64_t size) __attribute__((veda_compartment));
+uint64_t veda_rt_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
+                             uint64_t size) {
+  return veda_ocl_stack_d(region_offset, access_offset, size);
+}
+
+void veda_rt_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
+                         uint64_t size, uint64_t value) __attribute__((veda_compartment));
+void veda_rt_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
+                         uint64_t size, uint64_t value) {
+  (void)veda_ocs_stack_d(region_offset, access_offset, size, value);
+}

@@ -91,4 +91,25 @@ void veda_free(veda_obj_t obj);
 bool veda_ocl_d(veda_obj_t obj, uint64_t offset, uint64_t *out);
 bool veda_ocs_d(veda_obj_t obj, uint64_t offset, uint64_t value);
 
+// Toolchain Milestone 12: stack-local (alloca) protection, backed by the
+// SSC region already established in c15 (Toolchain Milestone 11), NOT
+// Object_ID-based -- unlike veda_ocl_d/_ocs_d above, there is no fresh
+// veda.bind here (c15 is already bound), and no software-side "bind
+// failed" error path: an invalid access is real hardware's own OCA/
+// CSetBounds/OCL.D-or-OCS.D hard trap, by design (see veda_rt_asm.S).
+// `region_offset` is a compile-time-assigned byte offset from c15's own
+// Base identifying WHICH local variable; `access_offset` is the byte
+// offset of this specific access within that variable's own bytes;
+// `size` is that variable's own real allocation size (the bound
+// CSetBounds narrows to). veda_ocl_stack_d returns the loaded value
+// DIRECTLY (not via an out-param, unlike veda_ocl_d above) -- a real,
+// empirically-found requirement: an out-param write-back is a plain
+// store, and this function's callers are always inside a live
+// veda_compartment call graph, where M19's purecap enforcement forbids
+// any raw store regardless of target or which function performs it.
+uint64_t veda_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
+                          uint64_t size);
+bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
+                      uint64_t size, uint64_t value);
+
 #endif // VEDA_RT_H

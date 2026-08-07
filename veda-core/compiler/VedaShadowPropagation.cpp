@@ -72,6 +72,33 @@
 //     veda_compiler_rt.c).
 //   declare void @veda_rt_ocs_d(i32, i64, i64)   -- Milestone 9: object_id,
 //     byte offset, 8-byte value. Real hardware backing: OCS.D.
+//   declare void @veda_rt_ocl_stack_d(i64, i64, i64, ptr)  -- Toolchain
+//     Milestone 12: region_offset, access_offset, size, out-param slot.
+//     Protects `alloca`-based C local variables (not heap objects) inside
+//     a veda_compartment function, backed by the SSC region already
+//     established in C15 (Toolchain Milestone 11) -- no Object_ID, since
+//     the target is always the already-bound C15, never a fresh
+//     veda.bind. Real hardware backing: OCA (position to region_offset
+//     within C15's whole region) then CSetBounds (narrow to exactly
+//     `size` bytes, this alloca's own allocation size) then OCL.D against
+//     the resulting narrowed, positioned capability -- see
+//     veda_rt_asm.S's own veda_ocl_stack_d_scratch_asm.
+//   declare void @veda_rt_ocs_stack_d(i64, i64, i64, i64)  -- mirror, OCS.D.
+//
+// Toolchain Milestone 12's own real, honest scope, matching real CHERI-
+// LLVM's own actual default (`CBM_Conservative`, CHERI C/C++ Programming
+// Guide Section 4.3.3 -- verified against the official guide, not
+// assumed): this protects SEPARATE local variables from overflowing into
+// each other (e.g. `int lower[4]; int upper[4];`), not fields WITHIN one
+// single allocation from each other (subobject bounds, e.g. a struct's
+// own internal array field overflowing into an adjacent field of that
+// same struct) -- real CHERI itself does not enable that by default
+// either, for the identical, documented compatibility reasons. Only
+// entry-block, static (fixed-size) allocas are recognized -- a
+// dynamic-size (VLA) alloca, or one placed outside the entry block, is
+// left completely unrewritten (zero protection, not degraded protection,
+// matching this pass's own established convention for untracked
+// addresses elsewhere).
 //
 // A real, honest, hardware-forced width limit (not a simplification of
 // convenience): Milestone 9's dereference rewrite only handles 64-bit
@@ -124,6 +151,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -131,6 +159,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -143,6 +172,11 @@ constexpr char kShadowLoadName[] = "veda_shadow_load";
 constexpr char kShadowAttachName[] = "veda_shadow_attach";
 constexpr char kOclFnName[] = "veda_rt_ocl_d";
 constexpr char kOcsFnName[] = "veda_rt_ocs_d";
+// Toolchain Milestone 12: stack-local (alloca) variants -- no Object_ID,
+// since the target is always the already-established, persistent SSC
+// capability in C15 (Toolchain Milestone 11), never a fresh veda.bind.
+constexpr char kOclStackFnName[] = "veda_rt_ocl_stack_d";
+constexpr char kOcsStackFnName[] = "veda_rt_ocs_stack_d";
 // Sentinel for "no known/tracked shadow" -- reuses the exact convention
 // already established by Toolchain Milestone 7's own VEDA_OBJ_INVALID
 // (veda_rt.h), not a freshly invented value.
@@ -159,6 +193,23 @@ constexpr uint64_t kVedaNullBase = 0x1000;
 // 32-bit range).
 constexpr uint64_t kSyntheticKeyTag = 1ULL << 63;
 
+// Toolchain Milestone 12: FixedCSRFIMap (RISCVFrameLowering.cpp:63-68,
+// personally re-verified against source before use) has exactly 13
+// entries (ra, s0, s1, s2-s11), giving fixed offsets -8 through -104
+// (-(RegNum+1)*8) -- permanently reserved for Milestone 11's own
+// callee-saved-spill mechanism inside a veda_compartment function's SSC
+// region. This IR-level pass runs entirely before the backend and has no
+// visibility into RISCVFrameLowering.cpp's own table, so it must
+// hardcode the identical numeric reservation as a pass-local constant.
+// Must be re-verified if Milestone 11's own table ever changes.
+constexpr int64_t kVedaCSRReservedBytes = 104;
+// Matches veda_compartment_entry.S's own hardcoded `Length=0x1000` for
+// the SSC region a compartment entry point establishes. A real,
+// hand-maintained cross-file constant (same risk category as
+// kVedaNullBase/VEDA_NULL_BASE above) -- if a future entry point ever
+// changes its own Length, this must be updated by hand too.
+constexpr int64_t kVedaSSCRegionLength = 4096;
+
 class VedaShadowPropagation : public PassInfoMixin<VedaShadowPropagation> {
 public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
@@ -174,6 +225,8 @@ private:
   FunctionCallee ShadowAttachFn;
   FunctionCallee OclFn;
   FunctionCallee OcsFn;
+  FunctionCallee OclStackFn;
+  FunctionCallee OcsStackFn;
 
   // Per (already-rewritten) function: original parameter indices that are
   // pointer-typed, in the same order their shadow params were appended.
@@ -186,7 +239,8 @@ private:
     StringRef N = F.getName();
     return N == kMallocRawName || N == kShadowStoreName ||
           N == kShadowLoadName || N == kShadowAttachName ||
-          N == kOclFnName || N == kOcsFnName;
+          N == kOclFnName || N == kOcsFnName ||
+          N == kOclStackFnName || N == kOcsStackFnName;
   }
 
   void attach(IRBuilder<> &B, Value *Ptr, Value *Shadow) {
@@ -198,6 +252,24 @@ private:
   Value *computeOffset(IRBuilder<> &B, Value *Addr) {
     Value *AsInt = B.CreatePtrToInt(Addr, I64Ty);
     return B.CreateSub(AsInt, ConstantInt::get(I64Ty, kVedaNullBase));
+  }
+
+  // Toolchain Milestone 12: a PHI merging pointers with AMBIGUOUS
+  // provenance (some incoming values alloca-family, some not, or the PHI
+  // itself never being alloca-family-propagated at all per this pass's
+  // own deliberate choice not to merge AllocaBase across a PHI's several
+  // possibly-different roots) must never be treated as either a heap
+  // -tracked or stack-tracked address -- doing so would silently
+  // misinterpret one shadow representation as the other. Real, honest,
+  // narrow gap (matches this project's own established "diagnosed and
+  // left unrewritten" convention): such a PHI's own resulting loads/
+  // stores are left completely unprotected, not miscompiled.
+  bool isAmbiguousAllocaPhi(Value *Addr, const DenseMap<Value *, Value *> &AB) {
+    auto *PN = dyn_cast<PHINode>(Addr);
+    if (!PN)
+      return false;
+    return llvm::any_of(PN->incoming_values(),
+                        [&](Use &U) { return AB.count(U.get()) != 0; });
   }
 
   // Synthesizes a unique, deterministic shadow-table key for "the pointer
@@ -319,6 +391,109 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
 
   DenseMap<Value *, Value *> Shadow;
 
+  // Toolchain Milestone 12: Phase B0 -- recognize every static AllocaInst
+  // in a veda_compartment function's entry block, assign each a fixed
+  // compile-time byte offset within the SSC-relative locals sub-region,
+  // and seed its shadow with that offset -- a compile-time i32 constant,
+  // NOT a runtime Object_ID, unlike heap objects. The existing GEP/BitCast
+  // propagation below is reused completely unmodified for the shadow
+  // value itself; it already only cares that Shadow.lookup(Addr) returns
+  // *some* Value*, regardless of whether that value originated from a
+  // malloc call's runtime out-param load or (new) this compile-time
+  // ConstantInt. AllocaBase/AllocaSize are a SEPARATE, parallel per-value
+  // map (keyed identically to Shadow for every tracked alloca-family
+  // value): presence in AllocaBase is what actually distinguishes "this
+  // shadow means a stack-local region offset" from "this shadow means a
+  // heap Object_ID" at Load/Store rewrite time below.
+  //
+  // Real, empirically-found placement bug (Toolchain Milestone 12, found
+  // via a real sail_riscv_sim trace, not assumed): an EARLIER version of
+  // this code anchored offsets at the TOP of the region (kVedaSSCRegionLength
+  // minus bytes-reserved-so-far), reasoning that Milestone 11's own
+  // FixedCSRFIMap-based CSR spills for the OUTERMOST compartment function
+  // land at SP_entry-8..SP_entry-104 = 3992..4088 (since SP_entry =
+  // kVedaSSCRegionLength = 4096 at compartment entry), so offsets just
+  // below 3992 seemed safe. This is true ONLY for the outermost function.
+  // Toolchain Milestone 12's own runtime helpers (veda_ocl_stack_d/
+  // veda_ocs_stack_d) are THEMSELVES veda_compartment-attributed (see
+  // runtime/veda_rt.c's own header comment on those two functions) and get
+  // called from inside the outer function's own call graph -- their CSR
+  // spills (e.g. their own `ra`) land at THEIR OWN current-SP-relative
+  // offset, and by the time such a nested call site is reached, SP has
+  // already drifted DOWN from 4096 by whatever real local-frame space the
+  // outer function needed for its own ordinary (non-Phase-B0-tracked)
+  // allocas -- e.g. the pass's own `%veda.ocl.scratch` output buffer,
+  // which forces a real `addi sp,sp,-N` Phase B0 has no visibility into
+  // (it runs at the IR level, long before the backend decides real frame
+  // sizes). Confirmed via trace: with the old top-anchored scheme, a
+  // nested veda_ocs_stack_d call's own `ra`-spill offset (SP-8, where SP
+  // had drifted to 0xF70) landed at absolute offset 0xF68 (3944) --
+  // exactly inside this function's own `upper[]` allocation window
+  // [3928,3960), silently aliasing `upper[2]`'s real data byte with
+  // veda_ocs_stack_d's own spilled return address, corrupting `ra` and
+  // crashing on return (misaligned-fetch, confirmed via --trace-gpr).
+  //
+  // Fixed by anchoring allocas at the BOTTOM of the region instead
+  // (starting right after kVedaCSRReservedBytes, growing upward) --
+  // maximally far from where ANY current-SP-relative CSR spill can land,
+  // since SP starts at kVedaSSCRegionLength (4096) and only ever
+  // decreases with deeper nesting/larger real frames, never below 0. For
+  // this design's own realistic, bounded call depths (a handful of
+  // runtime-helper levels, each needing at most a few dozen bytes of real
+  // local-frame space), SP drifting anywhere near offset ~168 (this
+  // milestone's own actual alloca footprint) is not a realistic risk --
+  // an honest, empirically-grounded margin, not a formally proven bound
+  // (the SAME class of hand-maintained, documented risk this file's own
+  // kVedaCSRReservedBytes/kVedaSSCRegionLength constants already carry).
+  DenseMap<Value *, Value *> AllocaBase; // tracked value -> alloca's own
+                                         // ptrtoint'd base address
+  DenseMap<Value *, Value *> AllocaSize; // tracked value -> alloca's own
+                                         // i64 byte size constant
+  if (F.hasFnAttribute("veda_compartment")) {
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    uint64_t ReservedSoFar = (uint64_t)kVedaCSRReservedBytes;
+    for (Instruction &I : llvm::make_early_inc_range(F.getEntryBlock())) {
+      auto *AI = dyn_cast<AllocaInst>(&I);
+      if (!AI)
+        continue;
+      auto *ArraySizeCI = dyn_cast<ConstantInt>(AI->getArraySize());
+      if (!AI->isStaticAlloca() || !ArraySizeCI) {
+        // Dynamic-size (VLA) alloca -- explicitly deferred (Toolchain
+        // Milestone 12's own stated scope limit): size genuinely isn't a
+        // compile-time constant, breaking this design's core
+        // simplification. Left completely unrewritten (zero protection,
+        // matching Milestone 8/9's own established convention for
+        // untracked addresses), not diagnosed as an error.
+        continue;
+      }
+      uint64_t ElemSize = DL.getTypeAllocSize(AI->getAllocatedType());
+      uint64_t Size = ElemSize * ArraySizeCI->getZExtValue();
+      if (Size == 0)
+        continue;
+      uint64_t Alignment = AI->getAlign().value();
+      uint64_t AbsoluteOffset = alignTo(ReservedSoFar, Alignment);
+      ReservedSoFar = AbsoluteOffset + Size;
+      if (ReservedSoFar > (uint64_t)kVedaSSCRegionLength) {
+        F.getContext().emitError(
+            &I, "veda_compartment function's local variables exceed the "
+                "SSC region's own capacity (" + Twine(kVedaSSCRegionLength) +
+                " bytes) -- Toolchain Milestone 12's real, honestly-stated "
+                "capacity limit, not a silent truncation");
+        continue;
+      }
+      Shadow[AI] = ConstantInt::get(I32Ty, AbsoluteOffset);
+      // Insert the ptrtoint immediately after AI itself (the same
+      // dominance-safe pattern already used throughout this file for GEP/
+      // BitCast/etc. below) -- guaranteed to dominate every real use,
+      // unlike a single shared builder captured once at the block's own
+      // first insertion point (which does not track newly-inserted
+      // instructions' own relative order across multiple allocas).
+      IRBuilder<> BaseB(AI->getNextNode());
+      AllocaBase[AI] = BaseB.CreatePtrToInt(AI, I64Ty, AI->getName() + ".base");
+      AllocaSize[AI] = ConstantInt::get(I64Ty, Size);
+    }
+  }
+
   // Seed: pointer parameters <-> the shadow parameter Phase A appended for
   // them (same order, appended after all original parameters).
   auto PPI = PointerParamIndices.find(&F);
@@ -394,6 +569,15 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
         // SoftBound's own "GEP propagates base/bound unchanged" rule.
         if (Value *S = Shadow.lookup(GEP->getPointerOperand())) {
           Shadow[GEP] = S;
+          // Toolchain Milestone 12: propagate alloca-family provenance
+          // forward through GEP unchanged (same rule as the shadow
+          // itself -- a GEP never changes which alloca a pointer refers
+          // to, only its own root/size do).
+          Value *Root = GEP->getPointerOperand();
+          if (Value *Base = AllocaBase.lookup(Root)) {
+            AllocaBase[GEP] = Base;
+            AllocaSize[GEP] = AllocaSize.lookup(Root);
+          }
           IRBuilder<> B(GEP->getNextNode());
           attach(B, GEP, S);
         }
@@ -403,6 +587,11 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
       if (auto *BC = dyn_cast<BitCastInst>(&I)) {
         if (Value *S = Shadow.lookup(BC->getOperand(0))) {
           Shadow[BC] = S;
+          Value *Root = BC->getOperand(0);
+          if (Value *Base = AllocaBase.lookup(Root)) {
+            AllocaBase[BC] = Base;
+            AllocaSize[BC] = AllocaSize.lookup(Root);
+          }
           IRBuilder<> B(BC->getNextNode());
           attach(B, BC, S);
         }
@@ -412,6 +601,34 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
       if (auto *SI = dyn_cast<StoreInst>(&I)) {
         Value *Addr = SI->getPointerOperand();
         Value *Stored = SI->getValueOperand();
+        if (isAmbiguousAllocaPhi(Addr, AllocaBase))
+          continue; // real, honest, narrow gap -- see isAmbiguousAllocaPhi
+        if (Value *StackBase = AllocaBase.lookup(Addr)) {
+          // Toolchain Milestone 12: the store's destination is a tracked
+          // STACK-LOCAL (alloca-family) slot -- redirect through OCA+
+          // CSetBounds-derived, capability-checked OCS.D against C15,
+          // NOT the heap-style OcsFn (which would misinterpret this
+          // region-offset shadow as an Object_ID). Same 64-bit-width
+          // scope limit as the heap path.
+          Type *StoredTy = Stored->getType();
+          if (!StoredTy->isPointerTy() && !StoredTy->isIntegerTy(64))
+            continue;
+          Value *RegionOffset = Shadow.lookup(Addr);
+          Value *AllocSize = AllocaSize.lookup(Addr);
+          if (!RegionOffset || !AllocSize)
+            continue; // defensive -- should always be set together
+          IRBuilder<> B(SI);
+          Value *AccessOffset =
+              B.CreateSub(B.CreatePtrToInt(Addr, I64Ty), StackBase);
+          Value *RawVal = StoredTy->isPointerTy()
+                              ? B.CreatePtrToInt(Stored, I64Ty)
+                              : Stored;
+          B.CreateCall(OcsStackFn,
+                       {B.CreateZExt(RegionOffset, I64Ty), AccessOffset,
+                        AllocSize, RawVal});
+          SI->eraseFromParent();
+          continue;
+        }
         if (Value *AddrShadow = Shadow.lookup(Addr)) {
           // Milestone 9: the STORE'S OWN DESTINATION is a tracked,
           // object-relative slot -- this is a real dereference of a
@@ -454,6 +671,50 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
 
       if (auto *LI = dyn_cast<LoadInst>(&I)) {
         Value *Addr = LI->getPointerOperand();
+        if (isAmbiguousAllocaPhi(Addr, AllocaBase))
+          continue;
+        if (Value *StackBase = AllocaBase.lookup(Addr)) {
+          // Toolchain Milestone 12: mirror-image of the store case above.
+          Type *LoadTy = LI->getType();
+          if (!LoadTy->isPointerTy() && !LoadTy->isIntegerTy(64))
+            continue;
+          Value *RegionOffset = Shadow.lookup(Addr);
+          Value *AllocSize = AllocaSize.lookup(Addr);
+          if (!RegionOffset || !AllocSize)
+            continue;
+          // Real, empirically-found requirement (found via a real
+          // sail_riscv_sim trace, not assumed): unlike the heap-object
+          // path below (which reuses ScratchSlot, an out-param written by
+          // a plain `sd` -- safe there since M9's heap demos never run
+          // inside a live compartment), this alloca-family path IS always
+          // reached from inside a live veda_compartment call graph. M19's
+          // purecap enforcement is a blanket rule (any raw load/store
+          // while veda_mode=1 hard-traps, regardless of what real memory
+          // it targets or which function performs it -- confirmed by a
+          // real PURECAP_VIOLATION trap, tval=0x227, at the out-param
+          // write-back `sd` inside veda_ocl_stack_d_scratch_asm), so an
+          // out-param scratch-buffer write-back is fundamentally
+          // incompatible here -- no function in the call chain can safely
+          // perform it, since Phase B0's provenance tracking is purely
+          // intraprocedural and never extends across a function
+          // boundary to a passed-in pointer argument. Fixed by returning
+          // the loaded value DIRECTLY in a0 (OclStackFn's own real
+          // signature is `uint64_t(i64,i64,i64)`, not
+          // `void(i64,i64,i64,ptr)`) -- no memory access at all, sidestepping
+          // this whole class of bug rather than routing around it.
+          IRBuilder<> B(LI);
+          Value *AccessOffset =
+              B.CreateSub(B.CreatePtrToInt(Addr, I64Ty), StackBase);
+          Value *RawVal = B.CreateCall(
+              OclStackFn,
+              {B.CreateZExt(RegionOffset, I64Ty), AccessOffset, AllocSize});
+          Value *Result = LoadTy->isPointerTy()
+                              ? B.CreateIntToPtr(RawVal, LoadTy)
+                              : RawVal;
+          LI->replaceAllUsesWith(Result);
+          LI->eraseFromParent();
+          continue;
+        }
         if (Value *AddrShadow = Shadow.lookup(Addr)) {
           // Milestone 9: real dereference of a tracked object -- redirect
           // through OCL.D.
@@ -510,6 +771,13 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
         else if (RHSNull && !LHSNull)
           PtrOperand = LHS;
         if (!PtrOperand || !PtrOperand->getType()->isPointerTy())
+          continue;
+        if (AllocaBase.count(PtrOperand))
+          // Toolchain Milestone 12: a stack address is never meaningfully
+          // compared to null in real C (no frontend emits `&local ==
+          // NULL`) -- skip the rewrite entirely rather than inventing
+          // invalid-alloca-shadow null semantics for a case that will
+          // not occur.
           continue;
         Value *S = Shadow.lookup(PtrOperand);
         if (!S)
@@ -594,6 +862,16 @@ PreservedAnalyses VedaShadowPropagation::run(Module &M,
   OcsFn = M.getOrInsertFunction(
       kOcsFnName, FunctionType::get(Type::getVoidTy(*Ctx),
                                     {I32Ty, I64Ty, I64Ty}, false));
+  // Toolchain Milestone 12: (region_offset, access_offset, size) -> i64,
+  // no Object_ID (unlike OclFn/OcsFn above) and no out-param (unlike
+  // OclFn) -- the loaded value returns directly in a0, since an out-param
+  // write-back is fundamentally incompatible with live purecap
+  // enforcement here (see the Load-rewrite call site's own comment).
+  OclStackFn = M.getOrInsertFunction(
+      kOclStackFnName, FunctionType::get(I64Ty, {I64Ty, I64Ty, I64Ty}, false));
+  OcsStackFn = M.getOrInsertFunction(
+      kOcsStackFnName, FunctionType::get(Type::getVoidTy(*Ctx),
+                                         {I64Ty, I64Ty, I64Ty, I64Ty}, false));
 
   bool Changed = rewriteSignatures(M);
 

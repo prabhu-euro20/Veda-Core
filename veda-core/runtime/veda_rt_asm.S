@@ -60,3 +60,69 @@ veda_ocl_d_scratch_asm:
 veda_ocs_d_scratch_asm:
     ocs.d c1, a0, a1
     ret
+
+# Toolchain Milestone 12: stack-local (alloca) protection primitives.
+# Unlike the c1-based primitives above (Object_ID-driven, fresh
+# veda.bind.notrap per call), these derive a tightly-bounded scratch
+# capability directly from c15 -- the persistent Stack-Spill Capability a
+# veda_compartment function's own hand-written entry point already
+# established once per compartment entry (Toolchain Milestone 11). No
+# Object_ID, no fresh bind: c15 is already bound.
+#
+# c13 is the hand-picked scratch destination -- confirmed via a real
+# grep audit (not assumed) free of collision with c15 (persistent SSC,
+# never overwritten here) and c14 (an existing informal "OSpecialRW
+# -discard" convention across 3 unrelated files -- reusing an ambiguously
+# -typed register for a real, live, load-bearing value here would be
+# exactly the risk Milestone 11's own C15-over-C14 register choice was
+# made to avoid). c13 itself is used elsewhere only as a transient
+# type-authority bind in veda_sched_asm.S's own unrelated scheduler
+# -invocation call path, never live during a veda_compartment function
+# body's own execution.
+#
+# Real, load-bearing instruction order (verified against veda_cap_insts.
+# sail's own real semantics before writing this, not assumed): OCA must
+# run FIRST to reach an arbitrary region_offset within c15's whole
+# region (CSetBounds's own new Base starts at the capability's CURRENT
+# offset, not an arbitrary one -- so CSetBounds-first only works when
+# region_offset is already 0). THEN CSetBounds narrows to exactly `size`
+# bytes -- this alloca's own real allocation size, not the individual
+# access width -- giving a real, hardware-enforced perimeter around
+# exactly this one local variable, isolating it from every other local
+# variable in the same SSC region (the actual protection this milestone
+# exists to provide). Both OCA and CSetBounds are real, already-tested
+# (Milestone V-B) soft-fail instructions -- an out-of-range region_offset
+# or size clears c13's own Tag bit rather than trapping immediately; the
+# subsequent OCL.D/OCS.D against an untagged c13 is what genuinely hard
+# -traps (Tag Violation or Bounds Violation), the real completion
+# criterion this milestone's own verification test proves empirically.
+
+# uint64_t veda_ocl_stack_d_scratch_asm(uint64_t region_offset /*a0*/,
+#                                        uint64_t access_offset /*a1*/,
+#                                        uint64_t size /*a2*/)
+# Real, empirically-found requirement (Toolchain Milestone 12, found via a
+# real sail_riscv_sim trace): unlike veda_ocl_d_scratch_asm above (which
+# writes its loaded value through an out-param pointer via a plain `sd` --
+# safe there since that path is never reached from inside a live
+# compartment), this helper's callers ARE always inside a live
+# veda_compartment call graph, where M19's purecap enforcement forbids
+# ANY raw load/store, including a write-back through an out-param to the
+# caller's own real stack address. Returns the loaded value directly in
+# a0 instead -- no memory access, no out-param, sidestepping the problem
+# entirely rather than routing around it.
+.global veda_ocl_stack_d_scratch_asm
+veda_ocl_stack_d_scratch_asm:
+    oca        c13, c15, a0
+    csetbounds c13, c13, a2
+    ocl.d      a0, c13, a1
+    ret
+
+# void veda_ocs_stack_d_scratch_asm(uint64_t region_offset /*a0*/,
+#                                    uint64_t access_offset /*a1*/,
+#                                    uint64_t size /*a2*/, uint64_t value /*a3*/)
+.global veda_ocs_stack_d_scratch_asm
+veda_ocs_stack_d_scratch_asm:
+    oca        c13, c15, a0
+    csetbounds c13, c13, a2
+    ocs.d      c13, a1, a3
+    ret

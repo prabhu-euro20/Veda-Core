@@ -206,12 +206,23 @@ literal, direct closure of Milestone 10's own finding, empirically re-verified e
 compiled C function runs inside a live `OCInvoke`-bound compartment with zero purecap traps, while
 an identical un-attributed build still traps for exactly `VEDA_CAUSE_PURECAP_VIOLATION`).
 
-**Still genuinely open**: `alloca`-based C locals — deriving a stack slot's Object_ID/offset at the
-IR level remains wholly unbuilt (the existing SoftBound-style pass, `VedaShadowPropagation.cpp`,
-has zero `AllocaInst` recognition today) — a real, separate, substantial piece of future toolchain
-work, architecturally distinct from the callee-saved-spill mechanism Milestone 11 closed (backend
-`RISCVFrameLowering`/`PrologEpilogInserter` machinery vs. IR-level `alloca` tracking — two different
-LLVM subsystems, confirmed via direct source read before Milestone 11 began). Also still open:
-globals/statics inside a compartment function, and nested `veda_compartment`→`veda_compartment`
-calls remain architecturally correct but untested by any real nested-call test case — both named
-explicitly in TOOLCHAIN_MILESTONE_11_RESULTS.md's own "Not yet built" section.
+**Also built since this section was first written**: `alloca`-based C locals
+(TOOLCHAIN_MILESTONE_12_RESULTS.md) — a new Phase B0 in `VedaShadowPropagation.cpp` recognizes every
+entry-block static `AllocaInst` in a `veda_compartment` function, assigns each a fixed compile-time
+offset within a dedicated locals sub-region of the same SSC region, and redirects its loads/stores
+through `OCA`-then-`CSetBounds`-narrowed `C13` and real `OCL.D`/`OCS.D` — architecturally distinct
+from Milestone 11's own backend `RISCVFrameLowering`/`PrologEpilogInserter` mechanism, exactly as
+predicted below (IR-level `alloca` tracking, not backend callee-saved-spill lowering). Empirically
+verified: two adjacent local arrays inside one compartment function are isolated from each other
+(a deliberate cross-array overflow hard-traps with the exact expected `VEDA_CAUSE_BOUNDS_VIOLATION`
+cause, traced not assumed), matching CHERI's own real `CBM_Conservative` default scope. Also closed
+along the way: nested `veda_compartment`→`veda_compartment` calls, previously named below as
+"architecturally correct but untested", now have a real, empirically-verified test case
+(`veda_compartment_nested_demo.c`, closed the same day as Milestone 11 itself — see
+TOOLCHAIN_MILESTONE_11_RESULTS.md's own updated "Not yet built" section).
+
+**Still genuinely open**: globals/statics inside a compartment function (still named explicitly in
+TOOLCHAIN_MILESTONE_11_RESULTS.md's own "Not yet built" section); subobject/struct-field-internal
+bounds, dynamic-size (VLA) allocas, non-entry-block allocas, and mixed-provenance PHIs beyond a
+narrow syntactic guard (all named explicitly in TOOLCHAIN_MILESTONE_12_RESULTS.md's own "Not yet
+built" section).
