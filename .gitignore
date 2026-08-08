@@ -56,6 +56,9 @@ act4-verify/.venv/
 # Editor and IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Build outputs, logs and caches
 */build/
