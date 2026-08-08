@@ -124,16 +124,25 @@ scenario to justify building," not above it.
 
 ## Open risks, stated honestly
 
-- **The table-base register itself is still not grep-audited or finalized** — this decision fixes *how*
-  it survives a switch, not *which* register it is.
-- **The save-area `Object_ID`s' own `Length` needs a mechanical update** to fit the new capability slot
-  — named here, not yet specified byte-for-byte.
+- **RESOLVED (`TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md`): the table-base register is `c11`,
+  finalized.** The fresh grep audit this document called for found `c11`'s own dual role (persistent
+  table-base vs. the switcher's transient resume-jump scratch) was the real conflict — closed by moving
+  the *transient* resume-jump role onto `c12` (a provably dead `OSpecialRW` discard-sink already in this
+  file, not `c10` as first tried — `c10` turned out to also be claimed by Milestone 13's own per-access
+  helpers). `c11` is now exclusively the persistent register.
+- **RESOLVED: the save-area `Object_ID`s' own `Length` update is specified and implemented** —
+  `0x0020`→`0x0030` (32→48 bytes), see Milestone 14's own results doc for the exact byte layout.
 - **Only two threads are modeled** — the scheduler's current round-robin scope (`Object_ID`s 160/161) is
-  inherited unchanged, not extended.
-- **Unverified beyond the reasoning in this document.** No test yet exercises globals-protection under
-  the scheduler; this should not be considered proven correct until a real test (thread A mints/uses a
-  global capability, yields, thread B runs, thread A resumes and the table-base capability is confirmed
-  intact) is written and run, mirroring Milestone 13's own bootstrap-correctness-checkpoint discipline.
+  inherited unchanged, not extended. Still true, unchanged by Milestone 14.
+- **RESOLVED: verified by a real combined test**
+  (`compiler/veda_sched_global_combo_entry.S`/`_threads.S`/`_demo.c`) — thread A mints/uses a shared
+  table-base capability, yields, thread B runs, thread A resumes and the table-base capability is
+  confirmed intact via a real checkable value, exactly the test shape this document called for. Full
+  regression, mutation-tested; see `TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md` for complete results.
+- **New, unplanned finding surfaced during implementation**: `save_area_0`/`save_area_1` had to move
+  back out of `.tcm_scratch` into ordinary `.data` — Sail cannot round-trip a capability's tag through
+  `TCM_SCRATCH_BASE` (a real, empirically-confirmed Sail/RTL asymmetry, since Sail has no TCM concept at
+  all). Recorded in full in Milestone 14's own results doc and in `sail_tests/vc_ocsc_bind_spill_restore_roundtrip.S`.
 - **The tracks' own gaps carry forward.** cheri-crf-precedent could not find any official CHERI source
   discussing a persistent, program-lifetime capability deliberately exempt from a scheduler's own
   spill/restore cycle — the shape Milestone 13's C11 reuse currently assumes. This decision resolves that

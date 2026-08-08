@@ -89,9 +89,13 @@ veda_sched_init_asm:
     .insn r 0x5b, 0x1, 0x10, x5, x5, x13  # cseal c5, c5, c13  -- sealed DATA_SCHED
 
     # ---- save-area-0: Object_ID 165, Load|Store, permanent bind c6 ----
+    # Length=0x0030 (48): 24B PC/base/length (unchanged) + 8B padding to a
+    # 16B boundary + 16B table-base-capability slot (CRF-exhaustion fix,
+    # TOOLCHAIN_MILESTONE_13_CRF_EXHAUSTION_DECISION.md +
+    # TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md).
     la   t0, save_area_0
     slli t0, t0, 32
-    li   t1, 0x0020000C
+    li   t1, 0x0030000C
     or   t0, t0, t1
     li   a0, 165
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
@@ -101,7 +105,7 @@ veda_sched_init_asm:
     # ---- save-area-1: Object_ID 166, Load|Store, permanent bind c7 ----
     la   t0, save_area_1
     slli t0, t0, 32
-    li   t1, 0x0020000C
+    li   t1, 0x0030000C
     or   t0, t0, t1
     li   a0, 166
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
@@ -147,6 +151,21 @@ veda_sched_init_asm:
     .insn r 0x0b, 0x3, 0x01, t5, x7, x5  # ocs.d c7, x5(=8), t5(entry1 again = base)
     li   x5, 16
     .insn r 0x0b, 0x3, 0x01, t6, x7, x5  # ocs.d c7, x5(=16), t6(len1)
+
+    # ---- pre-populate BOTH save-areas' new capability slot (offset 32)
+    #      with the caller's own already-bound c11 (the persistent
+    #      globals table-base capability, established by the entry
+    #      point's own bootstrap ceremony before this function is called).
+    #      Without this, resume_0/resume_1's FIRST-EVER call (before any
+    #      real yield has happened) would ocl.c-read the still-zeroed,
+    #      untagged region and corrupt c11 on the thread's very first
+    #      entry -- the same class of bug the PC/base/length
+    #      pre-population above already exists to avoid. See
+    #      TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md. ----
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x01, x11, x6, x5  # ocs.c c6, x5(=32), c11
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x01, x11, x7, x5  # ocs.c c7, x5(=32), c11
 
     # ---- init thread_index=0, yield_count=0 ----
     la   x5, thread_index
@@ -223,6 +242,8 @@ yielding_is_0:
     .insn r 0x0b, 0x3, 0x01, x29, x6, x5  # ocs.d c6, x5(=8), x29
     li   x5, 16
     .insn r 0x0b, 0x3, 0x01, x30, x6, x5  # ocs.d c6, x5(=16), x30
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x01, x11, x6, x5  # ocs.c c6, x5(=32), c11 -- spill globals table-base cap
     j    invoke_scheduler
 yielding_is_1:
     li   x5, 0
@@ -231,6 +252,8 @@ yielding_is_1:
     .insn r 0x0b, 0x3, 0x01, x29, x7, x5  # ocs.d c7, x5(=8), x29
     li   x5, 16
     .insn r 0x0b, 0x3, 0x01, x30, x7, x5  # ocs.d c7, x5(=16), x30
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x01, x11, x7, x5  # ocs.c c7, x5(=32), c11 -- spill globals table-base cap
 
 invoke_scheduler:
     la   x5, yield_count
@@ -260,12 +283,17 @@ after_scheduler_return:
     bnez x6, resume_1
 resume_0:
     .insn r 0x5b, 0x1, 0x13, x12, x6, x1  # ospecialrw c12(discard), tsc, c6 -- rs2=x1 selects TSC
+                                           # (c12's own discard value is dead
+                                           # here -- reused below as the
+                                           # resume-jump scratch, see do_resume)
     li   x5, 0
     .insn r 0x0b, 0x3, 0x00, x28, x6, x5  # ocl.d c6, x5(=0), x28  -- slot0's saved PC
     li   x5, 8
     .insn r 0x0b, 0x3, 0x00, x29, x6, x5  # ocl.d c6, x5(=8), x29  -- slot0's saved base
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x00, x11, x6, x5  # ocl.c c6, x5(=32), c11 -- restore globals table-base cap
     li   a0, 160
-    .insn i 0x0b, 0x5, x11, a0, 0         # veda.bind c11, a0  -- FRESH CODE_0, Offset=0
+    .insn i 0x0b, 0x5, x12, a0, 0         # veda.bind c12, a0  -- FRESH CODE_0, Offset=0
     j    do_resume
 resume_1:
     .insn r 0x5b, 0x1, 0x13, x12, x7, x1  # ospecialrw c12(discard), tsc, c7 -- rs2=x1 selects TSC
@@ -273,8 +301,10 @@ resume_1:
     .insn r 0x0b, 0x3, 0x00, x28, x7, x5  # ocl.d c7, x5(=0), x28
     li   x5, 8
     .insn r 0x0b, 0x3, 0x00, x29, x7, x5  # ocl.d c7, x5(=8), x29
+    li   x5, 32
+    .insn r 0x0b, 0x4, 0x00, x11, x7, x5  # ocl.c c7, x5(=32), c11 -- restore globals table-base cap
     li   a0, 161
-    .insn i 0x0b, 0x5, x11, a0, 0         # veda.bind c11, a0  -- FRESH CODE_1, Offset=0
+    .insn i 0x0b, 0x5, x12, a0, 0         # veda.bind c12, a0  -- FRESH CODE_1, Offset=0
 
 do_resume:
     # Atomic restore: freshly re-bind the chosen thread's own CODE
@@ -285,48 +315,86 @@ do_resume:
     # the SAME instruction, never a separate csrw+mret (confirmed unsafe
     # on the Sail side: mret itself would be fetched from OUTSIDE the
     # just-narrowed target's bounds).
+    #
+    # CRF-EXHAUSTION FIX (TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md):
+    # this resume-jump scratch role now uses c12, not c11 -- c12 is a
+    # proven, definitionally-dead OSpecialRW discard-sink everywhere else
+    # in this file (its written value is never read by anything), so
+    # reusing it here creates zero cross-file collision with
+    # runtime/veda_rt_asm.S's own Milestone-13 use of c10/c11. c11 is now
+    # EXCLUSIVELY the persistent globals table-base capability (spilled/
+    # restored above, alongside PC/base/length, never repurposed here),
+    # matching the same permanent-register discipline c6/c7/c8/c9 already
+    # have.
     sub  x31, x28, x29                      # delta = saved_pc - saved_base
-    .insn r 0x5b, 0x1, 0x0a, x11, x11, x31  # oca c11, c11, x31    -- c11.Offset := delta
-    .insn r 0x5b, 0x1, 0x15, x11, x11, x0   # csealentry c11, c11 -- mint sentry in place
-    .insn r 0x5b, 0x1, 0x16, x0, x11, x0    # ocreturn c11        -- atomically narrow + jump
+    .insn r 0x5b, 0x1, 0x0a, x12, x12, x31  # oca c12, c12, x31    -- c12.Offset := delta
+    .insn r 0x5b, 0x1, 0x15, x12, x12, x0   # csealentry c12, c12 -- mint sentry in place
+    .insn r 0x5b, 0x1, 0x16, x0, x12, x0    # ocreturn c12        -- atomically narrow + jump
     j    switcher_entry                       # must NOT be reached
 
-    # MILESTONE 24 Stage 3: save_area_0/save_area_1 are the hot
-    # cooperative-yield spill/restore target above (do_yield's OCS.D,
-    # do_resume's OCL.D pairs, e.g. lines 221-233/264-275). Moved into
-    # .tcm_scratch (veda_rt.ld's own new TCM_SCRATCH_BASE=0xA0000000
-    # region) so they land in veda_core.tlv's genuinely separate
-    # tcm_scratch[] array -- physical hygiene, matching the design doc's
-    # own Part D. HONEST CAVEAT, verified by re-reading this file's own
-    # instruction encodings before writing this comment: every access to
-    # save_area_0/1 here is OCL.D/OCS.D (funct3=0x3 plain doubleword,
-    # NOT OCL.C/OCS.C funct3=0x5 capability-width) -- and Stage 1 of this
-    # milestone deliberately scoped the DRAM-latency stall model to
-    # Object-Bind/Rebind + OCL.C/OCS.C only, explicitly excluding
-    # OCL.D/OCS.D. So THIS relocation currently changes zero stall
-    # cycles for the scheduler's real yield/resume path -- OCL.D/OCS.D
-    # never stalled here regardless of backing address. What it DOES do:
-    # (1) establishes the real linker convention this milestone's own
-    # test (veda_smoke_m24_ocsc_tcm.S) exercises via OCL.C/OCS.C instead,
-    # and (2) means any FUTURE change to a capability-width save
-    # (OCL.C/OCS.C) or to Object_ID 165/166 falling under
-    # TCM_ODT_ENTRIES automatically inherits the fast path with no
-    # further code change. Recorded honestly in
-    # veda-core/rtl/MILESTONE_24_RESULTS.md rather than claimed as a
-    # measured scheduler speedup. The other five symbols below
+    # MILESTONE 24 Stage 3 (original): save_area_0/save_area_1 were moved
+    # into .tcm_scratch (veda_rt.ld's own TCM_SCRATCH_BASE=0xA0000000
+    # region, backed by veda_core.tlv's own tcm_scratch[]/tcm_scratch_tag[]
+    # arrays) for a hypothetical future OCL.C/OCS.C-width save -- at the
+    # time, save_area_0/1 held only plain OCL.D/OCS.D fields (PC/base/
+    # length), which never stalled here regardless of placement (M24's
+    # own honest note: "this relocation currently changes zero stall
+    # cycles for the scheduler's real yield/resume path").
+    #
+    # REVERTED to ordinary .data (TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md),
+    # a real, empirically-found correction, not a stylistic choice: this
+    # file (runtime/veda_sched_asm.S) is TOOLCHAIN-LAYER, Sail-only --
+    # verified exclusively via sail_riscv_sim, with no RTL mirror of any
+    # kind (the RTL scheduler test, rtl/sim/veda_smoke_m23_scheduler.S, is
+    # a wholly separate file/context this one never touches). The Sail
+    # model has ZERO TCM concept by design (confirmed repeatedly across
+    # this project: Sail is a purely functional/architectural model, the
+    # DRAM-latency/TCM stall FSM is 100% RTL-only) -- and a direct,
+    # isolated empirical test this session
+    # (sail_tests/vc_debug_ocsc_roundtrip.S, bind-then-OCS.C-then-OCL.C on
+    # a plain capability, no scheduler involved) proved Sail's own
+    # tag-storage does NOT correctly round-trip a capability's tag through
+    # a .tcm_scratch/0xA0000000-placed address (PASSES at an ordinary
+    # .data address; FAILS with VEDA_CAUSE_TAG_VIOLATION, mtval packing
+    # cap_idx=1/cause=0x02, at 0xA0000000 -- same failure this fix's own
+    # new capability-slot save/restore hit before this correction). Since
+    # this file only ever executes under Sail, .tcm_scratch placement here
+    # provides no real benefit and actively breaks the new capability
+    # slot -- moved the WHOLE save_area_0/1 struct back to .data (not just
+    # the new slot) so both remain reachable through the SAME c6/c7
+    # capability, avoiding a third Object_ID/CRF-register claim.
+    #
+    # CRF-EXHAUSTION FIX (TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md):
+    # each save-area grows from 24 to 48 bytes -- the original 3
+    # `.dword`s (saved PC/base/length, offsets 0/8/16) are UNCHANGED;
+    # offset 24-31 is 8 bytes of padding, purely to push the new
+    # capability slot onto a 16-byte boundary (Veda-Core's tag-storage
+    # granule is (addr-BASE)>>4, confirmed in rtl/veda_core.tlv -- an RTL
+    # concept, kept here purely as good hygiene for a future RTL mirror,
+    # not because Sail itself requires 16-byte alignment); offset 32-47 is
+    # the new 16-byte slot holding the spilled/restored globals table-base
+    # capability (c11). `.align 3`->`.align 4` (8B->16B) guarantees offset
+    # 32 is genuinely 16-byte-aligned relative to the real linked address,
+    # not just the symbol-relative offset. The other five symbols below
     # (thread_index/yield_count/yield_limit/saved_ra/saved_sp) are plain
-    # scalar state, not on this hot spill path, and stay in ordinary
-    # .data.
-.section .tcm_scratch
-.align 3
+    # scalar state, not on this hot spill path, and already lived in
+    # ordinary .data.
+.section .data
+.align 4
 save_area_0:
     .dword 0
     .dword 0
     .dword 0
+    .dword 0   # offset 24-31: padding to the 16-byte-aligned capability slot
+    .dword 0   # offset 32-39: globals table-base capability (low 8B)
+    .dword 0   # offset 40-47: globals table-base capability (high 8B)
 save_area_1:
     .dword 0
     .dword 0
     .dword 0
+    .dword 0   # offset 24-31: padding
+    .dword 0   # offset 32-39: globals table-base capability (low 8B)
+    .dword 0   # offset 40-47: globals table-base capability (high 8B)
 
 .section .data
 .align 3
