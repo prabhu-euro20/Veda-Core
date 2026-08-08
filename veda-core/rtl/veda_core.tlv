@@ -45,6 +45,54 @@
    localparam bit [31:0] ODT_BASE = 32'h9000_0000;
    localparam int ODT_ENTRIES = 256;
    localparam int ODT_ENTRY_BYTES = 16;
+   // MILESTONE 24 (TCM_FAST_PATH_DESIGN.md): the first real DRAM-latency
+   // number this core has ever modeled -- every prior milestone's own
+   // cycle counts assumed odt_mem[]/elfmem[] access is always 1 cycle,
+   // which CRF_ARCHITECTURE_ALIGNMENT_VERDICT.md's own addendum found is
+   // only true because no latency was ever modeled, not because it's
+   // architecturally free. Swept {0,10,50} in verification
+   // (DRAM_TCM_LATENCY_STUDY.md's own real, DDR4-grounded range).
+   //
+   // Committed default is 0, NOT a nonzero value -- a real, deliberate
+   // correction found empirically this milestone, not assumed: every one
+   // of the 46 pre-existing RTL smoke tests uses Object-Bind (often
+   // several times, for compartment-entry setup), sharing ONE compiled
+   // veda_core.sv per run_veda_smoke_test.sh invocation, against fixed
+   // repeat(N) testbench cycle budgets as tight as repeat(12) (confirmed
+   // by direct grep before deciding this, e.g. tb_veda_smoke.sv:23) --
+   // shipping a nonzero default here would silently break most of that
+   // corpus via budget exhaustion, not any real logic defect. The stall
+   // mechanism itself is fully built and verified working correctly at a
+   // nonzero value via a dedicated new test with a properly-sized budget
+   // (veda_smoke_m24_latency.S) -- widening the pre-existing 46 tests'
+   // own budgets so a nonzero default is safe to ship globally is real,
+   // separate, mechanical follow-up work, named honestly as not done in
+   // this milestone, not silently assumed away.
+   localparam int DRAM_EXTRA_CYCLES = 0;
+   // MILESTONE 24 Stage 2 (TCM_FAST_PATH_DESIGN.md Part B): a fixed, LOW
+   // Object_ID range that never pays the DRAM-tier stall on Bind/Bind-
+   // NoTrap/Rebind. Real, deliberate simplification: odt_mem[] itself
+   // does NOT get physically split into a separate array -- the "TCM"
+   // property here is purely about latency classification (Object_ID <
+   // TCM_ODT_ENTRIES never stalls), not physical placement, since
+   // odt_mem[] is already a same-cycle-combinational SystemVerilog array
+   // with no memory-technology distinction in simulation. 32 entries =
+   // 512 bytes of the real, existing 16-byte ODT_ENTRY_BYTES layout --
+   // comfortably inside real Cortex-M/R TCM budgets (4KB-64KB) already
+   // cited in DRAM_TCM_LATENCY_STUDY.md. Placement is STATIC and
+   // software-declared (whichever Object_ID a program chooses to
+   // ODT-Populate below this threshold), never automatically promoted
+   // based on observed access frequency -- the real, cited security
+   // constraint from TCM_FAST_PATH_DESIGN.md Section 1 (GhostRider,
+   // ASPLOS 2015): placement must be independent of secret-correlated
+   // runtime data, which a fixed, compile-time-chosen range satisfies by
+   // construction. Per-hart-private: safe as a single, unpartitioned
+   // range only because MHARTID is fixed at 0 below -- if/when a real
+   // multi-hart Veda-Core is ever built, this must be revisited (per-hart
+   // banks, or a real static time-partitioned arbiter per Wang/
+   // Ferraiuolo/Suh HPCA 2014) before this same code can be trusted for
+   // the same security property -- written down, not silently assumed.
+   localparam int TCM_ODT_ENTRIES = 32;
    // RTL MILESTONE 12: this single-core RTL's own fixed hart identity --
    // no real MHARTID CSR/concept existed anywhere in this file before
    // now (a genuine new architectural constant, not a repurposed one).
@@ -470,6 +518,39 @@
       for (int veda_tm_i = 0; veda_tm_i < (ELFMEM_SIZE/16); veda_tm_i = veda_tm_i + 1)
          tag_mem[veda_tm_i] = 1'b0;
    end
+
+   // ─────────────────────────────────────────────────────────────────
+   //  MILESTONE 24 Stage 3 (TCM_FAST_PATH_DESIGN.md Part C, "Mechanism
+   //  A"): the TCM capability-spill scratch region -- generalizes the
+   //  already-decided OCS.C/OCL.C software-managed spill/restore pattern
+   //  (already used for the scheduler save-area) into a real, reusable
+   //  fast destination, distinct from elfmem[]. A genuinely SEPARATE
+   //  physical array (mirroring the real, existing odt_mem[]-vs-elfmem[]
+   //  precedent above -- two distinct base-address ranges, not a
+   //  carved-out sub-range of an existing array), at a real, deliberately
+   //  small, bounded size (4KiB, sized for the scheduler's own real
+   //  save_area_0/save_area_1 relocation -- 3 dwords=24 bytes each today
+   //  -- plus real headroom for a handful of future Mechanism-A spill
+   //  targets, without being large enough to become a second general-
+   //  purpose DRAM-equivalent region, which would blur the "small,
+   //  deterministic TCM" security framing the whole feature rests on).
+   //  tcm_scratch_tag[] mirrors tag_mem[]'s own real, out-of-band-tag
+   //  discipline exactly -- only OCL.C/OCS.C ever touch it, plain
+   //  OCL.D/OCS.D against a TCM-scratch address are explicitly out of
+   //  this milestone's own scope (they would fall outside elfmem[]'s own
+   //  declared bounds if ever attempted against 0xA0000000+, the same
+   //  natural, pre-existing out-of-range behavior any address outside
+   //  elfmem[] already has -- not a new gap this milestone introduces).
+   // ─────────────────────────────────────────────────────────────────
+   localparam bit [31:0] TCM_SCRATCH_BASE = 32'hA000_0000;
+   localparam bit [31:0] TCM_SCRATCH_SIZE = 32'h0000_1000;
+   logic [7:0] tcm_scratch [TCM_SCRATCH_BASE : TCM_SCRATCH_BASE + TCM_SCRATCH_SIZE - 1];
+   logic tcm_scratch_tag [0 : (TCM_SCRATCH_SIZE/16) - 1];
+   initial begin
+      for (int veda_ts_i = 0; veda_ts_i < (TCM_SCRATCH_SIZE/16); veda_ts_i = veda_ts_i + 1)
+         tcm_scratch_tag[veda_ts_i] = 1'b0;
+   end
+
    logic act4_mode;
    initial begin
       string elf_hex_path;
@@ -510,8 +591,19 @@
          //  as Milestone A / arm_single_cycle.tlv.
          // ─────────────────────────────────────────────────────────
          $reset_just_released = >>1$reset && !$reset;
+         // MILESTONE 24: >>1$veda_dram_busy (PREVIOUS cycle's busy state,
+         // never this cycle's own combinational value -- see the stall
+         // FSM's own header comment above for why this specific ordering
+         // matters) takes priority over >>1$pc_src -- a DRAM-tier access
+         // that also happens to be the last instruction before a branch
+         // must finish its own extra wait before the branch's own
+         // redirect is honored; nothing in this core freezes $pc today
+         // outside of this new condition (Milestone 14's own PCC-
+         // violation check forces $instr to NOP but never freezes $pc --
+         // confirmed by direct read before writing this).
          $pc[63:0] =
             ($reset || $reset_just_released) ? (act4_mode ? {32'b0, ELFMEM_BASE} : 64'b0) :
+            >>1$veda_dram_busy               ? >>1$pc :
             >>1$pc_src                       ? >>1$alt_pc :
                                                 >>1$pc + 64'd4;
 
@@ -559,9 +651,22 @@
          // The real trap itself (mcause/mepc/mtval/PC-redirect) is still
          // delivered via $veda_pcc_violation joining $veda_trap_taken
          // below, entirely independent of what $instr decodes to.
-         $instr[31:0] = $veda_pcc_violation ? 32'h00000013 :
-                        act4_mode           ? $instr_elf :
-                                               $instr_rom;
+         //
+         // MILESTONE 24: >>1$veda_dram_busy composed alongside the
+         // existing PCC-violation term, same literal NOP-substitution
+         // idiom -- this is the ONE piece of Milestone 14 that is
+         // genuinely reused verbatim here (M14 itself provides no
+         // stall/freeze mechanism to reuse, only this literal encoding
+         // trick -- see the stall FSM's own header comment above).
+         // Using >>1 here (not this cycle's own $veda_dram_busy) is what
+         // keeps this acyclic: the triggering instruction's REAL decode
+         // this cycle is never touched (>>1busy was 0 the cycle a fresh
+         // DRAM-tier access is first attempted), only the SUBSEQUENT
+         // DRAM_EXTRA_CYCLES cycles at the same (frozen) $pc are forced
+         // to NOP here.
+         $instr[31:0] = ($veda_pcc_violation || >>1$veda_dram_busy) ? 32'h00000013 :
+                        act4_mode                                   ? $instr_elf :
+                                                                       $instr_rom;
 
          // ─────────────────────────────────────────────────────────
          //  DECODE
@@ -826,6 +931,81 @@
          // capability" input -- distinct enough from Bind/Bind-NoTrap to
          // need its own write path below, not a shared one.
          $is_veda_rebind      = $is_veda_bind && ($veda_bind_mode == 2'b10);
+
+         // ─────────────────────────────────────────────────────────
+         //  MILESTONE 24: real DRAM-latency stall FSM (TCM_FAST_PATH_
+         //  DESIGN.md Part A). Scope, deliberately narrow (design doc's
+         //  own reasoning): only Object-Bind/Bind-NoTrap/Rebind's ODT
+         //  access and OCL.C/OCS.C's capability-width memory access --
+         //  NOT plain OCL.D/OCS.D, NOT ordinary ld/sd, which would
+         //  silently regress ACT4's own cycle-count assumptions for no
+         //  benefit this milestone's own scope needs.
+         //
+         //  Real correctness property, verified by hand-tracing before
+         //  writing this (not copied from the design doc's own first-
+         //  draft formula, which had a same-cycle combinational-loop
+         //  risk: gating $instr on THIS cycle's own $veda_dram_busy,
+         //  itself derived from decoding THIS cycle's $instr, is a real
+         //  cycle in the dependency graph). The fix: $instr's own NOP-
+         //  forcing (below) and $pc's own freeze (below) both gate on
+         //  >>1$veda_dram_busy (the PREVIOUS cycle's busy state, a real
+         //  register read, never this cycle's own combinational value) --
+         //  so the triggering Bind/OCL.C/OCS.C instruction decodes and
+         //  executes NORMALLY, unforced, on its own first (only) fetch
+         //  cycle -- $bind_wr_en/$oclc_wr_en/OCS.C's own always_ff write
+         //  logic below are completely untouched, same 1-cycle write
+         //  latency as every prior milestone. The new mechanism purely
+         //  holds $pc at the SAME value for DRAM_EXTRA_CYCLES additional
+         //  cycles afterward (forcing NOP during those extra cycles only)
+         //  before the NEXT instruction is allowed to fetch -- verified
+         //  by hand-tracing to add exactly DRAM_EXTRA_CYCLES extra cycles
+         //  (not DRAM_EXTRA_CYCLES+1, a real off-by-one the same-cycle-
+         //  load-into-stall_cnt formula below specifically avoids).
+         //
+         //  $veda_dram_stall_req fires exactly once per DRAM-tier access
+         //  attempt: real decode this cycle (safe -- $instr is unforced
+         //  whenever >>1busy was 0, which is the only time this guard
+         //  passes) AND not already mid-stall (>>1busy==0) AND not also a
+         //  PCC violation (a faulting fetch must not spuriously start a
+         //  stall that would then eat into the trap-handling flow).
+         // ─────────────────────────────────────────────────────────
+         // MILESTONE 24 Stage 2: the Bind/Bind-NoTrap/Rebind term gains
+         // the `&& !$veda_odt_tcm_hit` guard (judged on Object_ID).
+         // MILESTONE 24 Stage 3: OCL.C/OCS.C's own term gains the
+         // `&& !$veda_capmem_tcm_hit` guard (judged on the resolved
+         // memory address, $veda_capmem_tcm_hit defined below alongside
+         // $veda_capmem_granule -- SandPiper's own order-independent
+         // elaboration within this @0 stage, already relied on
+         // throughout this file, makes the forward reference safe).
+         $veda_dram_stall_req =
+            !$veda_pcc_violation && !(>>1$veda_dram_busy) &&
+            ((($is_veda_bind_plain || $is_veda_bind_notrap || $is_veda_rebind) && !$veda_odt_tcm_hit) ||
+             (($is_veda_ocl_c || $is_veda_ocs_c) && !$veda_capmem_tcm_hit));
+         // Same-cycle load (NOT >>1$veda_dram_stall_req) -- loading on the
+         // >>1-delayed request would add one extra spurious cycle before
+         // the counter reflects the real remaining wait, the exact
+         // off-by-one caught by hand-tracing above.
+         $veda_dram_stall_cnt[7:0] =
+            $reset                       ? 8'd0 :
+            $veda_dram_stall_req         ? DRAM_EXTRA_CYCLES[7:0] :
+            (>>1$veda_dram_stall_cnt != 8'd0) ? (>>1$veda_dram_stall_cnt - 8'd1) :
+                                                 8'd0;
+         // Real bug caught only by actually running the regression (not
+         // just hand-tracing the nonzero-E case): $veda_dram_stall_req can
+         // fire on any DRAM-tier access attempt REGARDLESS of
+         // DRAM_EXTRA_CYCLES's own value (it's a pure decode/idle check,
+         // never compared against E). Without the explicit
+         // `DRAM_EXTRA_CYCLES != 0` guard here, busy would go true for
+         // exactly one spurious cycle even at the E=0 regression floor
+         // (stall_cnt loads to 0 that same cycle, but stall_req alone
+         // still made busy true), forcing one spurious NOP after every
+         // single Bind/OCL.C/OCS.C even with the feature nominally "off"
+         // -- confirmed as a real functional regression (Milestone 4 and
+         // Milestone 10's own POSITIVE tests genuinely failed) before
+         // this fix, not a hypothetical concern.
+         $veda_dram_busy = ($veda_dram_stall_cnt != 8'd0) ||
+                            ($veda_dram_stall_req && (DRAM_EXTRA_CYCLES != 0));
+
          // mode=11 (VEDA_BIND_RESERVED, Sail: Illegal_Instruction()) --
          // deliberately produces no write-enable anywhere below, this
          // file's own established floor for "no trap to raise" (matches
@@ -991,6 +1171,15 @@
          //  boundary, not silent truncation.
          // ─────────────────────────────────────────────────────────
          $veda_object_id[22:0] = $rs1_data[22:0];
+         // MILESTONE 24 Stage 2: judged on the FULL 23-bit Object_ID
+         // above, NOT the truncated low-8-bit $veda_odt_idx below -- a
+         // TCM-tier placement decision must never be judged on the
+         // already-aliased index, or a DRAM-tier object sharing the same
+         // low byte as a TCM-tier one could be misclassified, the exact
+         // class of bug Milestone 15 (below) already found and fixed for
+         // ODT lookups generally. This must not reintroduce a variant of
+         // it for latency classification specifically.
+         $veda_odt_tcm_hit = ($veda_object_id < {17'b0, TCM_ODT_ENTRIES[5:0]});
          $veda_odt_idx[7:0]    = $veda_object_id[7:0];
          $veda_odt_addr[31:0]  = ODT_BASE + ({24'b0, $veda_odt_idx} * 32'd16);
          $veda_odt_base[31:0]   = {odt_mem[$veda_odt_addr+3], odt_mem[$veda_odt_addr+2], odt_mem[$veda_odt_addr+1], odt_mem[$veda_odt_addr+0]};
@@ -1610,6 +1799,22 @@
          // power of two -- the same technique already used in the Sail
          // model's own tag-store index computation, byte_off >> 4).
          $veda_capmem_granule[31:0] = ($veda_real_addr[31:0] - ELFMEM_BASE) >> 4;
+
+         // MILESTONE 24 Stage 3: OCL.C/OCS.C's own TCM routing decision --
+         // a real, separate address-range check on $veda_real_addr
+         // (already computed above), completely independent of Stage 2's
+         // Object_ID-based $veda_odt_tcm_hit (OCL.C/OCS.C's rs1 selects a
+         // CRF register, never an Object_ID -- these two "_tcm_hit"
+         // signals are judged on fundamentally different data and must
+         // stay separate). A parallel, TCM-relative granule index is
+         // real, load-bearing, not cosmetic: feeding a TCM_SCRATCH_BASE
+         // -relative address into tag_mem[]'s own ELFMEM_SIZE-scoped
+         // index space would alias or overflow -- the exact "easy-to-
+         // miss bug class" flagged before any code was written here, now
+         // closed by construction with its own, separate index.
+         $veda_capmem_tcm_hit = ($veda_real_addr[31:0] >= TCM_SCRATCH_BASE) &&
+                                 ($veda_real_addr[31:0] <  (TCM_SCRATCH_BASE + TCM_SCRATCH_SIZE));
+         $veda_capmem_tcm_granule[31:0] = ($veda_real_addr[31:0] - TCM_SCRATCH_BASE) >> 4;
 
          // ─────────────────────────────────────────────────────────
          //  VEDA-CORE RTL MILESTONE 7: byte-granular tag invalidation --
@@ -2854,7 +3059,21 @@
          // instruction's destination is a Capability Register, not a
          // GPR -- same reason OCA/CSetBounds/CSeal/CUnseal are absent
          // from $reg_write below).
+         // MILESTONE 24 Stage 3: real address-range mux -- a TCM-tier
+         // OCL.C reads from tcm_scratch[] (real, separate array, never
+         // elfmem[] itself, matching the design's own genuinely-separate
+         // -array precedent), a DRAM-tier one reads from elfmem[]
+         // exactly as every prior milestone already did.
          $veda_oclc_load_data[127:0] =
+            $veda_capmem_tcm_hit ?
+            {tcm_scratch[$veda_real_addr[31:0]+15], tcm_scratch[$veda_real_addr[31:0]+14],
+             tcm_scratch[$veda_real_addr[31:0]+13], tcm_scratch[$veda_real_addr[31:0]+12],
+             tcm_scratch[$veda_real_addr[31:0]+11], tcm_scratch[$veda_real_addr[31:0]+10],
+             tcm_scratch[$veda_real_addr[31:0]+9],  tcm_scratch[$veda_real_addr[31:0]+8],
+             tcm_scratch[$veda_real_addr[31:0]+7],  tcm_scratch[$veda_real_addr[31:0]+6],
+             tcm_scratch[$veda_real_addr[31:0]+5],  tcm_scratch[$veda_real_addr[31:0]+4],
+             tcm_scratch[$veda_real_addr[31:0]+3],  tcm_scratch[$veda_real_addr[31:0]+2],
+             tcm_scratch[$veda_real_addr[31:0]+1],  tcm_scratch[$veda_real_addr[31:0]+0]} :
             {elfmem[$veda_real_addr[31:0]+15], elfmem[$veda_real_addr[31:0]+14],
              elfmem[$veda_real_addr[31:0]+13], elfmem[$veda_real_addr[31:0]+12],
              elfmem[$veda_real_addr[31:0]+11], elfmem[$veda_real_addr[31:0]+10],
@@ -2880,7 +3099,13 @@
          // itself succeeded (real CHERI's own core tagged-memory
          // property, already the load-bearing reason this milestone
          // exists, restated here at the point it's actually enforced).
-         $veda_oclc_loaded_tag = tag_mem[$veda_capmem_granule];
+         // MILESTONE 24 Stage 3: the SAME tier decision selects the tag
+         // source AND its own tier-relative granule index -- reading
+         // tag_mem[] with a tcm_scratch-relative granule (or vice versa)
+         // is exactly the aliasing/overflow risk flagged before writing
+         // this; both index AND array must switch together.
+         $veda_oclc_loaded_tag = $veda_capmem_tcm_hit ?
+            tcm_scratch_tag[$veda_capmem_tcm_granule] : tag_mem[$veda_capmem_granule];
 
          $load_data[63:0] =
             $is_lb  ? {{56{$mem_shifted[7]}},  $mem_shifted[7:0]}  :
@@ -3352,8 +3577,32 @@
    // (storing an invalid capability is legal; it just cannot be loaded
    // back as valid) -- the tag_mem[] write below correctly records
    // "not a real capability" for those bytes either way, not skipped.
+   // MILESTONE 24 Stage 3: the same real address-range decision
+   // (CPU_veda_capmem_tcm_hit_a0) selects tcm_scratch[]/tcm_scratch_tag[]
+   // (real, separate arrays) instead of elfmem[]/tag_mem[] -- array AND
+   // granule index switch together, the same paired discipline the read
+   // side above already applies, closing the same aliasing/overflow risk
+   // on the write side too.
    always_ff @(posedge clk) begin
-      if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0) begin
+      if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0 && CPU_veda_capmem_tcm_hit_a0) begin
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+0]  <= CPU_veda_ocsc_packed_a0[7:0];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+1]  <= CPU_veda_ocsc_packed_a0[15:8];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+2]  <= CPU_veda_ocsc_packed_a0[23:16];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+3]  <= CPU_veda_ocsc_packed_a0[31:24];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+4]  <= CPU_veda_ocsc_packed_a0[39:32];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+5]  <= CPU_veda_ocsc_packed_a0[47:40];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+6]  <= CPU_veda_ocsc_packed_a0[55:48];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+7]  <= CPU_veda_ocsc_packed_a0[63:56];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+8]  <= CPU_veda_ocsc_packed_a0[71:64];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+9]  <= CPU_veda_ocsc_packed_a0[79:72];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+10] <= CPU_veda_ocsc_packed_a0[87:80];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+11] <= CPU_veda_ocsc_packed_a0[95:88];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+12] <= CPU_veda_ocsc_packed_a0[103:96];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+13] <= CPU_veda_ocsc_packed_a0[111:104];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+14] <= CPU_veda_ocsc_packed_a0[119:112];
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+15] <= CPU_veda_ocsc_packed_a0[127:120];
+         tcm_scratch_tag[CPU_veda_capmem_tcm_granule_a0] <= CPU_veda_ocsc_store_tag_a0;
+      end else if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0) begin
          elfmem[CPU_veda_real_addr_a0[31:0]+0]  <= CPU_veda_ocsc_packed_a0[7:0];
          elfmem[CPU_veda_real_addr_a0[31:0]+1]  <= CPU_veda_ocsc_packed_a0[15:8];
          elfmem[CPU_veda_real_addr_a0[31:0]+2]  <= CPU_veda_ocsc_packed_a0[23:16];

@@ -282,6 +282,21 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_ssc_cross_thread.vvp" "$SIM/veda_core.sv"
 echo "==> Simulating (SSC cross-thread isolation)"
 vvp "$SIM/sim_ssc_cross_thread.vvp" +elf_hex="$SIM/veda_smoke_ssc_cross_thread.hex"
 
+echo "==> Milestone 24: Compiling (real DRAM-latency stall FSM, no-op-at-E=0 regression check)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m24lat.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m24_latency.sv"
+echo "==> Simulating (Milestone 24 latency)"
+vvp "$SIM/sim_m24lat.vvp" +elf_hex="$SIM/veda_smoke_m24_latency.hex"
+
+echo "==> Milestone 24 Stage 2: Compiling (TCM ODT tier, no-op-at-E=0 regression check)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m24odttcm.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m24_odt_tcm.sv"
+echo "==> Simulating (Milestone 24 Stage 2 ODT TCM tier)"
+vvp "$SIM/sim_m24odttcm.vvp" +elf_hex="$SIM/veda_smoke_m24_odt_tcm.hex"
+
+echo "==> Milestone 24 Stage 3: Compiling (TCM capability-spill scratch, OCL.C/OCS.C address-range mux)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_m24ocsctcm.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_m24_ocsc_tcm.sv"
+echo "==> Simulating (Milestone 24 Stage 3 OCL.C/OCS.C TCM scratch)"
+vvp "$SIM/sim_m24ocsctcm.vvp" +elf_hex="$SIM/veda_smoke_m24_ocsc_tcm.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

@@ -291,7 +291,33 @@ do_resume:
     .insn r 0x5b, 0x1, 0x16, x0, x11, x0    # ocreturn c11        -- atomically narrow + jump
     j    switcher_entry                       # must NOT be reached
 
-.section .data
+    # MILESTONE 24 Stage 3: save_area_0/save_area_1 are the hot
+    # cooperative-yield spill/restore target above (do_yield's OCS.D,
+    # do_resume's OCL.D pairs, e.g. lines 221-233/264-275). Moved into
+    # .tcm_scratch (veda_rt.ld's own new TCM_SCRATCH_BASE=0xA0000000
+    # region) so they land in veda_core.tlv's genuinely separate
+    # tcm_scratch[] array -- physical hygiene, matching the design doc's
+    # own Part D. HONEST CAVEAT, verified by re-reading this file's own
+    # instruction encodings before writing this comment: every access to
+    # save_area_0/1 here is OCL.D/OCS.D (funct3=0x3 plain doubleword,
+    # NOT OCL.C/OCS.C funct3=0x5 capability-width) -- and Stage 1 of this
+    # milestone deliberately scoped the DRAM-latency stall model to
+    # Object-Bind/Rebind + OCL.C/OCS.C only, explicitly excluding
+    # OCL.D/OCS.D. So THIS relocation currently changes zero stall
+    # cycles for the scheduler's real yield/resume path -- OCL.D/OCS.D
+    # never stalled here regardless of backing address. What it DOES do:
+    # (1) establishes the real linker convention this milestone's own
+    # test (veda_smoke_m24_ocsc_tcm.S) exercises via OCL.C/OCS.C instead,
+    # and (2) means any FUTURE change to a capability-width save
+    # (OCL.C/OCS.C) or to Object_ID 165/166 falling under
+    # TCM_ODT_ENTRIES automatically inherits the fast path with no
+    # further code change. Recorded honestly in
+    # veda-core/rtl/MILESTONE_24_RESULTS.md rather than claimed as a
+    # measured scheduler speedup. The other five symbols below
+    # (thread_index/yield_count/yield_limit/saved_ra/saved_sp) are plain
+    # scalar state, not on this hot spill path, and stay in ordinary
+    # .data.
+.section .tcm_scratch
 .align 3
 save_area_0:
     .dword 0
@@ -301,6 +327,9 @@ save_area_1:
     .dword 0
     .dword 0
     .dword 0
+
+.section .data
+.align 3
 thread_index:
     .dword 0
 yield_count:
