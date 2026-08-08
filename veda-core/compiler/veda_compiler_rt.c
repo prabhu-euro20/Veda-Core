@@ -124,3 +124,28 @@ void veda_rt_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
                          uint64_t size, uint64_t value) {
   (void)veda_ocs_stack_d(region_offset, access_offset, size, value);
 }
+
+// Toolchain Milestone 13: pass-facing ABI for global/static protection --
+// mirrors veda_rt_ocl_stack_d/veda_rt_ocs_stack_d's own real ABI shape
+// exactly (value returned directly, no out-param), for the identical
+// real reason (Milestone 12's own finding 3). Both attributed for the
+// identical real reason as the stack-locals pair above (Milestone 12's
+// own finding 2) -- these are always reached from inside a live
+// compartment's own call graph, unlike veda_rt_init_globals (runtime/
+// veda_rt.c), which runs before the first OCInvoke and needs no
+// attribute at all.
+uint64_t veda_rt_ocl_global_d(uint64_t table_slot_offset,
+                              uint64_t access_offset,
+                              uint64_t size) __attribute__((veda_compartment));
+uint64_t veda_rt_ocl_global_d(uint64_t table_slot_offset,
+                              uint64_t access_offset, uint64_t size) {
+  return veda_ocl_global_d(table_slot_offset, access_offset, size);
+}
+
+void veda_rt_ocs_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                          uint64_t size,
+                          uint64_t value) __attribute__((veda_compartment));
+void veda_rt_ocs_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                          uint64_t size, uint64_t value) {
+  veda_ocs_global_d(table_slot_offset, access_offset, size, value);
+}

@@ -146,7 +146,42 @@ Veda-Core adopts the same split. `OCL`/`OCS`/`NMC_ADD` (Custom-0) and Veda-Atomi
 
 ## 2. The CRF Blueprint (Capability Register File)
 
-16 registers (`c0`–`c15`), each 128 bits + 1 out-of-band Tag bit. Confirmed field layout:
+16 registers (`c0`–`c15`), each 128 bits + 1 out-of-band Tag bit, kept as a register file physically
+**separate** from the 32 RVA23 integer GPRs. **Register-count/organization rationale, added retroactively
+after a full standards-alignment review** (`CRF_ARCHITECTURE_ALIGNMENT_VERDICT.md`) confirmed this
+choice had never actually been evaluated against real CHERI-RISC-V's own convention before being fixed
+here — every other number in this section has a cited source; this one did not, until now:
+
+- **Not a literal CHERI-merged file (capability metadata folded into all 32 GPRs), and this is not an
+  arbitrary departure**: real CHERI-RISC-V's switch from CHERI-MIPS's own earlier split register file to
+  today's merged-only convention was causally enabled by CHERI Concentrate compressing the architectural
+  capability to exactly `2×XLEN` (128 bits for RV64) — "with register tags and 128-bit compressed
+  capabilities, extending existing general-purpose registers to support capabilities became a feasible
+  approach, as register size doubled rather than quadrupled" (CTSRD-CHERI/cheri-specification,
+  `chap-rationale.tex`, "Capability Register File" section). Veda-Core's own capability is 128 bits
+  **uncompressed** (`Object_ID`(23)+`Base`(32)+`Length`(16)+`Offset`(16)+`Perms`(16)+`otype`(16)+
+  `Reserved`(8) = 127+1 pad, this section, below) — a full 32-bit `Base` and 16-bit `Length` carried in
+  the clear, not a CHERI-Concentrate-style relative-bounds encoding. Folding this into RVA23's own
+  32-entry, 64-bit GPR file would make every GPR ≥128 bits, all the time, with no compression to offset
+  the cost — the precondition that made merging cheap for real CHERI does not hold here.
+- **Not simply widened to 32 while staying separate, either**: no real CHERI variant (or CHERI-adjacent
+  architecture) has ever shipped a "wide (32) but still separate/indirection-based" capability register
+  file — CHERI-RISC-V's own spec co-specified merged and split options early on, but "in practice, only
+  variants of CHERI-RISC-V using a 'merged' register file were implemented in emulators, soft cores,
+  toolchains, and operating systems" (same source, `chap-cheri-riscv.tex`). A 32-entry separate file
+  would be a Veda-Core-original point with no standards precedent behind it, at the real cost of widening
+  the hard 4-bit `vcapidx` field (`veda_types.sail:24`) across every CRF-referencing instruction.
+- **What actually makes 16 sufficient**: Object-Bind is a cheap ODT-lookup-and-cache (Section 4, below),
+  not a from-scratch bounds computation the way a real CHERI capability must already be self-contained —
+  CHERI needs a large, GPR-sized register pool specifically because re-deriving a capability from a raw
+  pointer isn't possible; re-deriving a Veda-Core capability from its `Object_ID` is a single ODT read.
+  CRF pressure here is "how many live object-handles am I juggling," not "how many raw pointers am I
+  threading through this function" — a smaller, architecturally different kind of pressure than what
+  CHERI's 32-per-GPR convention was sized to solve. This argument is not yet backed by a quantitative
+  cross-architecture study (see the verdict doc's own "Open risks" section) — treat it as the current,
+  best-evidenced structural reason, not a closed question.
+
+Confirmed field layout:
 
 | Field | Width | Notes |
 |---|---|---|

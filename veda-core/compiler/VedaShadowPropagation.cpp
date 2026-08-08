@@ -156,6 +156,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
@@ -177,6 +178,14 @@ constexpr char kOcsFnName[] = "veda_rt_ocs_d";
 // capability in C15 (Toolchain Milestone 11), never a fresh veda.bind.
 constexpr char kOclStackFnName[] = "veda_rt_ocl_stack_d";
 constexpr char kOcsStackFnName[] = "veda_rt_ocs_stack_d";
+// Toolchain Milestone 13: global/static variants -- (table_slot_offset,
+// access_offset, size) -> i64 / void, no Object_ID (the table itself is
+// consulted via OCL.C at runtime; the pass never sees an Object_ID for an
+// individual global at all). See veda_rt_asm.S's own
+// veda_ocl_global_d_scratch_asm for the real OCL.C-then-OCL.D/OCS.D
+// sequence this dispatches to.
+constexpr char kOclGlobalFnName[] = "veda_rt_ocl_global_d";
+constexpr char kOcsGlobalFnName[] = "veda_rt_ocs_global_d";
 // Sentinel for "no known/tracked shadow" -- reuses the exact convention
 // already established by Toolchain Milestone 7's own VEDA_OBJ_INVALID
 // (veda_rt.h), not a freshly invented value.
@@ -210,6 +219,43 @@ constexpr int64_t kVedaCSRReservedBytes = 104;
 // changes its own Length, this must be updated by hand too.
 constexpr int64_t kVedaSSCRegionLength = 4096;
 
+// Toolchain Milestone 13: real, on-the-wire capability width
+// (VEDA_CORE_SPEC.md Section 2 -- Tag(1,out-of-band)+128 data bits,
+// OCL.C/OCS.C's own real access width, veda_ocl_insts.sail:130 "16 (bytes)
+// = 128 bits") -- one capability-table slot is exactly this many bytes.
+constexpr uint64_t kVedaCapTableSlotBytes = 16;
+// Real linker-provided symbols (runtime/veda_rt.ld, this milestone's own
+// addition, mirroring the file's existing __bss_start/__bss_end
+// precedent) bounding the two source regions every table-resident
+// per-global capability is OCA/CSetBounds-derived from once at bootstrap.
+// __data_start..__bss_end is ONE contiguous span honestly over-covering
+// the small .tohost gap the real linker script places between .data and
+// .bss -- see that file's own comment for the full reasoning (harmless:
+// an Object_ID's own bounds accounting never affects an ordinary,
+// non-capability access to the same physical bytes).
+constexpr char kRodataStartSym[] = "__rodata_start";
+constexpr char kRodataEndSym[] = "__rodata_end";
+constexpr char kDataStartSym[] = "__data_start";
+constexpr char kBssEndSym[] = "__bss_end";
+
+// One compile-time-computed row of the compiler-emitted bootstrap tuple
+// table (Toolchain Milestone 13's own real, checked departure from
+// CHERI's literal linker-emitted __cap_relocs mechanism -- see
+// TOOLCHAIN_MILESTONE_13_DESIGN.md Section 3 for the full reasoning: this
+// project's real linker/clang have no cap-reloc feature, so Phase B1
+// itself computes and emits this table as ordinary compiler-generated
+// data instead). `RegionOffset` is a Constant (a link-time-resolved
+// symbol-difference expression, e.g. `ptrtoint(@g) - ptrtoint(@__data_start)`)
+// rather than a plain integer, since the real numeric value is not known
+// until the linker places both symbols.
+struct VedaGlobalTableEntry {
+  GlobalVariable *GV;
+  bool IsRodata;
+  Constant *RegionOffset;
+  uint64_t Size;
+  uint64_t SlotIndex;
+};
+
 class VedaShadowPropagation : public PassInfoMixin<VedaShadowPropagation> {
 public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
@@ -227,6 +273,19 @@ private:
   FunctionCallee OcsFn;
   FunctionCallee OclStackFn;
   FunctionCallee OcsStackFn;
+  FunctionCallee OclGlobalFn;
+  FunctionCallee OcsGlobalFn;
+
+  // Toolchain Milestone 13: Phase B1's own module-wide result -- every
+  // qualifying global's real byte size and its assigned capability-table
+  // slot BYTE offset (SlotIndex * kVedaCapTableSlotBytes, precomputed here
+  // so propagateInFunction's own Load/Store dispatch never needs to
+  // multiply). Populated once by propagateGlobals, consulted by every
+  // later per-function propagateInFunction call -- the same
+  // populate-module-wide-then-consult-per-function shape
+  // PointerParamIndices below already establishes.
+  DenseMap<GlobalVariable *, uint64_t> GlobalTableSlotOffset;
+  DenseMap<GlobalVariable *, uint64_t> GlobalSize;
 
   // Per (already-rewritten) function: original parameter indices that are
   // pointer-typed, in the same order their shadow params were appended.
@@ -240,11 +299,42 @@ private:
     return N == kMallocRawName || N == kShadowStoreName ||
           N == kShadowLoadName || N == kShadowAttachName ||
           N == kOclFnName || N == kOcsFnName ||
-          N == kOclStackFnName || N == kOcsStackFnName;
+          N == kOclStackFnName || N == kOcsStackFnName ||
+          N == kOclGlobalFnName || N == kOcsGlobalFnName;
   }
 
   void attach(IRBuilder<> &B, Value *Ptr, Value *Shadow) {
     B.CreateCall(ShadowAttachFn, {Ptr, Shadow});
+  }
+
+  // Toolchain Milestone 13: find the GlobalVariable a Load/Store's own
+  // pointer operand roots at, if any -- unlike Phase B0's AllocaBase (a
+  // forward-propagation map populated instruction-by-instruction as Pass 2
+  // visits each GEP/BitCast INSTRUCTION), a GlobalVariable's identity is
+  // always directly recoverable from Addr's own structure at the
+  // Load/Store site itself, with no separate propagation pass needed: a
+  // constant-index global access is an inline GEP ConstantExpr (never a
+  // real Instruction Pass 2's own per-instruction loop would ever visit),
+  // so provenance must be read off Addr directly here instead.
+  // dyn_cast<GEPOperator> is the real LLVM idiom that uniformly matches
+  // BOTH a GetElementPtrInst (variable-index access, a real instruction)
+  // and a GEP ConstantExpr (constant-index access) through one common
+  // interface (confirmed against the real checked-out
+  // llvm/include/llvm/IR/Operator.h before writing this). A direct
+  // GlobalVariable operand (a scalar global, or element/field 0 of an
+  // aggregate -- needs no GEP at all, offset 0 is the base address
+  // itself) is the third, degenerate shape, handled by the first check.
+  // Only single-level GEPs are handled -- a real, honest, narrow scope
+  // limit (matching this pass's own established convention): a
+  // multi-level GEP chain (e.g. a global array of structs, each
+  // containing an array field) is left completely unrewritten rather
+  // than attempting unverified multi-hop offset accumulation.
+  GlobalVariable *findGlobalRoot(Value *Addr) {
+    if (auto *GV = dyn_cast<GlobalVariable>(Addr))
+      return GV;
+    if (auto *GEPOp = dyn_cast<GEPOperator>(Addr))
+      return dyn_cast<GlobalVariable>(GEPOp->getPointerOperand());
+    return nullptr;
   }
 
   // Byte offset of a tracked pointer within its own object -- see the
@@ -289,6 +379,7 @@ private:
   }
 
   bool rewriteSignatures(Module &M);
+  void propagateGlobals(Module &M);
   void propagateInFunction(Function &F);
 };
 
@@ -380,6 +471,137 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
     F->eraseFromParent();
 
   return !Targets.empty();
+}
+
+//===----------------------------------------------------------------------===//
+// Toolchain Milestone 13: Phase B1 -- module-wide GlobalVariable
+// recognition and capability-table slot assignment. Runs once, before
+// propagateInFunction's per-function loop (mirroring rewriteSignatures's
+// own module-wide-first ordering) -- module-wide, not per-function,
+// since a GlobalVariable's own uses genuinely span the whole module
+// (confirmed by direct compilation this session: the SAME global can be
+// referenced from both a veda_compartment-attributed function and an
+// ordinary unattributed one in the same module), architecturally unlike
+// Phase B0's AllocaInst (inherently local to the one function that emits
+// it). See TOOLCHAIN_MILESTONE_13_DESIGN.md Section 1/3 for the full
+// real design reasoning behind every decision below.
+//===----------------------------------------------------------------------===//
+void VedaShadowPropagation::propagateGlobals(Module &M) {
+  const DataLayout &DL = M.getDataLayout();
+
+  // Real, linker-provided region-boundary symbols (runtime/veda_rt.ld,
+  // this milestone's own addition) -- referenced here purely for their
+  // ADDRESS (ptrtoint), the identical convention this project's own
+  // runtime code already uses for a raw linker symbol whose "type" is
+  // meaningless (runtime/veda_rt.c's own `extern char _end[];`).
+  IntegerType *I8Ty = Type::getInt8Ty(*Ctx);
+  GlobalVariable *RodataStart =
+      cast<GlobalVariable>(M.getOrInsertGlobal(kRodataStartSym, I8Ty));
+  GlobalVariable *DataStart =
+      cast<GlobalVariable>(M.getOrInsertGlobal(kDataStartSym, I8Ty));
+
+  // Toolchain Milestone 13's own real scope (TOOLCHAIN_MILESTONE_13_DESIGN.md
+  // Section 4): only rewrite uses found inside functions that already
+  // carry veda_compartment -- a genuinely new policy question Phase B0
+  // never faced, since an alloca is inherently local to one function but
+  // a global's own users() legitimately span attributed and unattributed
+  // functions alike (confirmed by direct compilation this session). A
+  // GEP ConstantExpr operand has no "containing function" of its own --
+  // only the real Load/Store instruction that ultimately embeds it does
+  // -- so its own users() must be checked one level further to find that
+  // instruction.
+  auto usedByCompartmentFunction = [](GlobalVariable &GV) {
+    for (User *U : GV.users()) {
+      if (auto *Inst = dyn_cast<Instruction>(U)) {
+        if (Inst->getFunction()->hasFnAttribute("veda_compartment"))
+          return true;
+        continue;
+      }
+      if (auto *CE = dyn_cast<ConstantExpr>(U)) {
+        for (User *CEU : CE->users())
+          if (auto *CEInst = dyn_cast<Instruction>(CEU))
+            if (CEInst->getFunction()->hasFnAttribute("veda_compartment"))
+              return true;
+      }
+    }
+    return false;
+  };
+
+  SmallVector<VedaGlobalTableEntry, 8> TableEntries;
+  uint64_t NextSlot = 0;
+  for (GlobalVariable &GV : M.globals()) {
+    if (GV.isDeclaration())
+      // Real, empirically-found sizing-safety gate (LLVM-internals track,
+      // this milestone's own research): getTypeAllocSize on an
+      // incomplete-type extern (e.g. this project's own real
+      // `extern char _end[];`, runtime/veda_rt.c) returns 0, not the real
+      // cross-TU size -- unsafe to trust. Only globals actually defined
+      // in this translation unit are ever given a table slot.
+      continue;
+    if (GV.getName() == kRodataStartSym || GV.getName() == kRodataEndSym ||
+        GV.getName() == kDataStartSym || GV.getName() == kBssEndSym)
+      continue; // the region-boundary symbols themselves, never a real
+                // user-defined global this pass should ever protect
+    if (!usedByCompartmentFunction(GV))
+      continue;
+    uint64_t Size = DL.getTypeAllocSize(GV.getValueType());
+    if (Size == 0)
+      continue;
+
+    bool IsRodata = GV.isConstant();
+    GlobalVariable *RegionStart = IsRodata ? RodataStart : DataStart;
+    Constant *GVAddr = ConstantExpr::getPtrToInt(&GV, I64Ty);
+    Constant *RegionStartAddr = ConstantExpr::getPtrToInt(RegionStart, I64Ty);
+    // A link-time-resolved symbol-difference constant, not a plain
+    // integer -- the real numeric value is not known until the linker
+    // places both @GV and the region-start symbol (TOOLCHAIN_MILESTONE_13_
+    // DESIGN.md Section 1's own real reasoning for why this must be a
+    // Constant, not a compile-time uint64_t).
+    Constant *RegionOffset = ConstantExpr::getSub(GVAddr, RegionStartAddr);
+
+    uint64_t Slot = NextSlot++;
+    GlobalTableSlotOffset[&GV] = Slot * kVedaCapTableSlotBytes;
+    GlobalSize[&GV] = Size;
+    TableEntries.push_back({&GV, IsRodata, RegionOffset, Size, Slot});
+  }
+
+  if (TableEntries.empty())
+    return; // no veda_compartment function in this module touches any
+            // global -- nothing to emit, matching this pass's own
+            // zero-overhead-when-unused convention elsewhere (e.g.
+            // ScratchSlot's own lazy creation).
+
+  // Emit the bootstrap tuple table as ordinary compiler-generated data --
+  // a real, checked departure from CHERI's own literal linker-emitted
+  // __cap_relocs mechanism (this project's real linker/clang have no
+  // such feature, confirmed directly this session -- see
+  // TOOLCHAIN_MILESTONE_13_DESIGN.md Section 3). One tightly-packed
+  // { region_selector, region_offset, size } i64 triple per entry --
+  // table_slot is deliberately OMITTED from the emitted row itself, since
+  // it is always exactly the row's own index * kVedaCapTableSlotBytes,
+  // recoverable by the bootstrap routine from its own loop counter alone,
+  // matching this pass's own established "don't emit a redundant field"
+  // discipline.
+  StructType *EntryTy =
+      StructType::get(*Ctx, {I64Ty, I64Ty, I64Ty}, /*isPacked=*/true);
+  SmallVector<Constant *, 8> Rows;
+  for (const VedaGlobalTableEntry &E : TableEntries) {
+    Constant *RegionSelector =
+        ConstantInt::get(I64Ty, E.IsRodata ? 0 : 1);
+    Rows.push_back(ConstantStruct::get(
+        EntryTy, {RegionSelector, E.RegionOffset,
+                 ConstantInt::get(I64Ty, E.Size)}));
+  }
+  ArrayType *TableArrTy = ArrayType::get(EntryTy, Rows.size());
+  Constant *TableInit = ConstantArray::get(TableArrTy, Rows);
+  auto *TableGV = new GlobalVariable(
+      M, TableArrTy, /*isConstant=*/true, GlobalValue::ExternalLinkage,
+      TableInit, "__veda_global_table_meta");
+  auto *CountGV = new GlobalVariable(
+      M, I64Ty, /*isConstant=*/true, GlobalValue::ExternalLinkage,
+      ConstantInt::get(I64Ty, Rows.size()), "__veda_global_table_count");
+  (void)TableGV;
+  (void)CountGV;
 }
 
 //===----------------------------------------------------------------------===//
@@ -629,6 +851,41 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
           SI->eraseFromParent();
           continue;
         }
+        // Toolchain Milestone 13: the store's destination roots at a
+        // qualifying GlobalVariable (compile-time offset already assigned
+        // by propagateGlobals) -- redirect through OCL.C-loaded,
+        // already-exactly-bounded, capability-checked OCS.D. Real,
+        // explicit gate on THIS function's own attribute, not merely on
+        // whether GV has a slot at all: GlobalTableSlotOffset is
+        // populated module-wide for any global touched by AT LEAST ONE
+        // veda_compartment function, so an access from a DIFFERENT,
+        // unattributed function reaching the SAME global must still be
+        // left completely untouched (TOOLCHAIN_MILESTONE_13_DESIGN.md
+        // Section 4's own explicit scope boundary -- a genuinely new
+        // policy question Phase B0 never faced, since an alloca's own
+        // AllocaBase map is inherently already function-scoped).
+        if (F.hasFnAttribute("veda_compartment")) {
+          if (GlobalVariable *GV = findGlobalRoot(Addr)) {
+            auto SlotIt = GlobalTableSlotOffset.find(GV);
+            if (SlotIt != GlobalTableSlotOffset.end()) {
+              Type *StoredTy = Stored->getType();
+              if (!StoredTy->isPointerTy() && !StoredTy->isIntegerTy(64))
+                continue; // out of scope width, see file header
+              IRBuilder<> B(SI);
+              Value *AccessOffset = B.CreateSub(
+                  B.CreatePtrToInt(Addr, I64Ty), B.CreatePtrToInt(GV, I64Ty));
+              Value *RawVal = StoredTy->isPointerTy()
+                                  ? B.CreatePtrToInt(Stored, I64Ty)
+                                  : Stored;
+              B.CreateCall(OcsGlobalFn,
+                           {ConstantInt::get(I64Ty, SlotIt->second),
+                            AccessOffset,
+                            ConstantInt::get(I64Ty, GlobalSize[GV]), RawVal});
+              SI->eraseFromParent();
+              continue;
+            }
+          }
+        }
         if (Value *AddrShadow = Shadow.lookup(Addr)) {
           // Milestone 9: the STORE'S OWN DESTINATION is a tracked,
           // object-relative slot -- this is a real dereference of a
@@ -714,6 +971,31 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
           LI->replaceAllUsesWith(Result);
           LI->eraseFromParent();
           continue;
+        }
+        // Toolchain Milestone 13: mirror-image of the store case above --
+        // same explicit F-attribute gate for the same real reason.
+        if (F.hasFnAttribute("veda_compartment")) {
+          if (GlobalVariable *GV = findGlobalRoot(Addr)) {
+            auto SlotIt = GlobalTableSlotOffset.find(GV);
+            if (SlotIt != GlobalTableSlotOffset.end()) {
+              Type *LoadTy = LI->getType();
+              if (!LoadTy->isPointerTy() && !LoadTy->isIntegerTy(64))
+                continue; // out of scope width, see file header
+              IRBuilder<> B(LI);
+              Value *AccessOffset = B.CreateSub(
+                  B.CreatePtrToInt(Addr, I64Ty), B.CreatePtrToInt(GV, I64Ty));
+              Value *RawVal = B.CreateCall(
+                  OclGlobalFn, {ConstantInt::get(I64Ty, SlotIt->second),
+                               AccessOffset,
+                               ConstantInt::get(I64Ty, GlobalSize[GV])});
+              Value *Result = LoadTy->isPointerTy()
+                                  ? B.CreateIntToPtr(RawVal, LoadTy)
+                                  : RawVal;
+              LI->replaceAllUsesWith(Result);
+              LI->eraseFromParent();
+              continue;
+            }
+          }
         }
         if (Value *AddrShadow = Shadow.lookup(Addr)) {
           // Milestone 9: real dereference of a tracked object -- redirect
@@ -872,8 +1154,18 @@ PreservedAnalyses VedaShadowPropagation::run(Module &M,
   OcsStackFn = M.getOrInsertFunction(
       kOcsStackFnName, FunctionType::get(Type::getVoidTy(*Ctx),
                                          {I64Ty, I64Ty, I64Ty, I64Ty}, false));
+  // Toolchain Milestone 13: (table_slot_offset, access_offset, size) ->
+  // i64, no Object_ID -- mirrors OclStackFn/OcsStackFn's own real ABI
+  // shape exactly (value returned directly in a0, no out-param;
+  // Milestone 12's own finding 3 applies identically here).
+  OclGlobalFn = M.getOrInsertFunction(
+      kOclGlobalFnName, FunctionType::get(I64Ty, {I64Ty, I64Ty, I64Ty}, false));
+  OcsGlobalFn = M.getOrInsertFunction(
+      kOcsGlobalFnName, FunctionType::get(Type::getVoidTy(*Ctx),
+                                          {I64Ty, I64Ty, I64Ty, I64Ty}, false));
 
   bool Changed = rewriteSignatures(M);
+  propagateGlobals(M);
 
   SmallVector<Function *, 16> Funcs;
   for (Function &F : M)

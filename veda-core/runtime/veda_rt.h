@@ -112,4 +112,30 @@ uint64_t veda_ocl_stack_d(uint64_t region_offset, uint64_t access_offset,
 bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
                       uint64_t size, uint64_t value);
 
+// Toolchain Milestone 13: global/static (C `int g;`/`static int s;`)
+// protection. Individually-bounded per-symbol capabilities, minted once
+// at bootstrap (veda_rt_init_globals, below) and cached into a small
+// in-memory capability table -- real CHERI's own __cap_relocs property,
+// adapted to this project's own 256-entry ODT budget (see
+// TOOLCHAIN_MILESTONE_13_DESIGN.md for the full real reasoning). Must be
+// called exactly once, before the first OCInvoke in the program.
+//
+// The table itself: a fixed 16-slot (256-byte) upper bound, not exactly-
+// sized to any one program's own real global count -- a real, named,
+// not-yet-resolved open risk (TOOLCHAIN_MILESTONE_13_RESULTS.md). The
+// hand-written entry point's own _start references this array directly
+// by symbol name (a plain `la`), giving it its own dedicated Object_ID
+// distinct from the .data+.bss source region.
+extern uint8_t g_veda_global_cap_table[16 * 16];
+void veda_rt_init_globals(void);
+
+// Per-access load/store against an already-minted, table-resident
+// per-global capability -- table_slot_offset/access_offset/size are
+// computed at compile time by VedaShadowPropagation.cpp's own Phase B1,
+// never by hand-written code.
+uint64_t veda_ocl_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                           uint64_t size);
+void veda_ocs_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                       uint64_t size, uint64_t value);
+
 #endif // VEDA_RT_H

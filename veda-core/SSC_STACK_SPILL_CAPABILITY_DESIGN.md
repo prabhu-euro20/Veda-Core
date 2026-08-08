@@ -221,8 +221,32 @@ along the way: nested `veda_compartment`→`veda_compartment` calls, previously 
 (`veda_compartment_nested_demo.c`, closed the same day as Milestone 11 itself — see
 TOOLCHAIN_MILESTONE_11_RESULTS.md's own updated "Not yet built" section).
 
-**Still genuinely open**: globals/statics inside a compartment function (still named explicitly in
-TOOLCHAIN_MILESTONE_11_RESULTS.md's own "Not yet built" section); subobject/struct-field-internal
-bounds, dynamic-size (VLA) allocas, non-entry-block allocas, and mixed-provenance PHIs beyond a
-narrow syntactic guard (all named explicitly in TOOLCHAIN_MILESTONE_12_RESULTS.md's own "Not yet
-built" section).
+**Also built since this section was first written**: C global/static variables
+(TOOLCHAIN_MILESTONE_13_RESULTS.md) — a new Phase B1 in `VedaShadowPropagation.cpp` recognizes every
+module-scope `GlobalVariable` used inside a `veda_compartment` function, mints each its own
+individually-bounded capability once at program bootstrap (real CHERI's own `__cap_relocs` property,
+adapted to this project's own real 256-entry ODT), caches it into an in-memory capability table via
+`OCS.C` (Milestone 7, newly load-bearing), and redirects loads/stores through `OCL.C`-loaded,
+already-exact capabilities and real `OCL.D`/`OCS.D` — architecturally distinct from both Milestone
+11's backend mechanism and Milestone 12's own SSC-region-relative, per-access-narrowed design (globals
+are not SSC-region-relative at all; they live at fixed, link-time addresses in `.data`/`.bss`/
+`.rodata`, and their own backing capability must persist across every compartment entry/exit and every
+distinct compartment in the program, the opposite of SSC's own deliberate per-crossing clearing).
+Empirically verified: two adjacent globals inside one compartment function are isolated from each
+other, with isolation enforced at each global's *own* capability boundary (not a shared region's own
+access-site narrowing) — a strictly stronger, more directly CHERI-precedented property than Milestone
+12's own design offers for stack locals. This closes the one gap both Milestone 11 and Milestone 12
+left explicitly open in their own "Not yet built" sections.
+
+**Still genuinely open**: subobject/struct-field-internal bounds, dynamic-size (VLA) allocas,
+non-entry-block allocas, and mixed-provenance PHIs beyond a narrow syntactic guard (all named
+explicitly in TOOLCHAIN_MILESTONE_12_RESULTS.md's own "Not yet built" section); extern globals,
+global accesses inside non-attributed functions, a linker-emitted `__cap_relocs`-equivalent, exact
+capability-table sizing, and multi-compartment concurrent global sharing (all named explicitly in
+TOOLCHAIN_MILESTONE_13_RESULTS.md's own "Not yet built" section). The CRF-register-exhaustion finding
+this milestone's own register audit surfaced (every CRF register 0-15 already has some real use, so no
+register is free for a future program combining globals-protection with the scheduler) now has a
+decided, cited mechanism — extend the scheduler's own per-thread save-area to spill/restore the
+table-base capability at every switch, matching CHERIoT's own documented convention (see
+TOOLCHAIN_MILESTONE_13_CRF_EXHAUSTION_DECISION.md) — but is still unimplemented pending a real
+combined test program, so it remains listed here as open in *implementation*, not in *design*.

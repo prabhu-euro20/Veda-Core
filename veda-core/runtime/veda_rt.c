@@ -17,6 +17,19 @@ extern uint64_t veda_ocl_stack_d_scratch_asm(uint64_t region_offset,
 extern void veda_ocs_stack_d_scratch_asm(uint64_t region_offset,
                                          uint64_t access_offset,
                                          uint64_t size, uint64_t value);
+// Toolchain Milestone 13: global/static protection.
+extern void veda_mint_global_cap_rodata_asm(uint64_t region_offset,
+                                            uint64_t size,
+                                            uint64_t table_slot_offset);
+extern void veda_mint_global_cap_data_asm(uint64_t region_offset,
+                                          uint64_t size,
+                                          uint64_t table_slot_offset);
+extern uint64_t veda_ocl_global_d_scratch_asm(uint64_t table_slot_offset,
+                                              uint64_t access_offset,
+                                              uint64_t size);
+extern void veda_ocs_global_d_scratch_asm(uint64_t table_slot_offset,
+                                          uint64_t access_offset,
+                                          uint64_t size, uint64_t value);
 
 static bool g_in_use[VEDA_RT_MAX_OBJECTS];
 static bool g_retired[VEDA_RT_MAX_OBJECTS];
@@ -106,6 +119,20 @@ bool veda_ocs_d(veda_obj_t obj, uint64_t offset, uint64_t value) {
   return true;
 }
 
+// Toolchain Milestone 13: the in-memory capability table itself -- a
+// real, ordinary .bss-resident array, its own address given its own
+// dedicated Object_ID by the entry point's own hand-written ceremony
+// (distinct from the .data+.bss SOURCE region -- the table is a real
+// allocation with its own bounds, not literally "inside" either source
+// region conceptually, even though it happens to physically live in
+// .bss). Non-static (external linkage) so the hand-written entry point's
+// own _start can reference it by name via a plain `la`. Fixed-size upper
+// bound (16 slots = 256 bytes), not exactly-sized to whatever a given
+// program's own Phase B1 tuple table actually needs -- a real, named,
+// not-yet-resolved open risk (TOOLCHAIN_MILESTONE_13_RESULTS.md), not
+// silently assumed sufficient for every future program.
+uint8_t g_veda_global_cap_table[16 * 16];
+
 // Toolchain Milestone 12: no software bind-failure path exists here --
 // c15 is already established by the compartment's own entry point (never
 // this runtime); an invalid access hard-traps inside the asm helper's
@@ -138,4 +165,82 @@ bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
                       uint64_t size, uint64_t value) {
   veda_ocs_stack_d_scratch_asm(region_offset, access_offset, size, value);
   return true;
+}
+
+// Toolchain Milestone 13: global/static protection -- real, checked
+// departure from CHERI's own literal linker-emitted __cap_relocs
+// mechanism (this project's real linker/clang have no cap-reloc feature,
+// confirmed directly -- see TOOLCHAIN_MILESTONE_13_DESIGN.md Section 3):
+// VedaShadowPropagation.cpp's own Phase B1 emits a compiler-generated
+// tuple table (`__veda_global_table_meta`/`_count`) naming every
+// compartment-touched global's own region/offset/size. This struct's
+// own layout must match Phase B1's own emitted `<{i64,i64,i64}>` packed
+// LLVM struct type exactly, field-for-field -- a real, hand-maintained
+// cross-file ABI, the same risk category as this file's own kVedaNullBase
+// -class constants elsewhere in this project.
+struct __attribute__((packed)) veda_global_table_entry {
+  uint64_t region_selector; // 0 = .rodata, 1 = .data+.bss
+  uint64_t region_offset;   // byte offset from the region's own start
+  uint64_t size;            // this global's own real byte size
+};
+// Real regression found and fixed via a real full-suite regression run
+// (not assumed): Phase B1 only EMITS these two symbols for a translation
+// unit that actually contains at least one qualifying global
+// (VedaShadowPropagation.cpp's own propagateGlobals, `if
+// (TableEntries.empty()) return;`) -- any OTHER program linking this
+// SAME veda_rt.c (Milestone 9's own heap-object demos with zero globals,
+// or runtime/run_veda_rt_tests.sh's own standalone suite, which never
+// invokes the pass plugin AT ALL) has NO file anywhere in its own link
+// line that defines them, and veda_rt_init_globals's own body below
+// references them unconditionally -- a real "undefined reference" link
+// failure, confirmed directly. Fixed with WEAK fallback DEFINITIONS
+// (not mere extern declarations) directly here: real C/ELF weak-symbol
+// semantics mean Phase B1's own STRONG (ExternalLinkage) emission, when
+// it exists anywhere in a given program's link line, correctly overrides
+// this default; when it does not, this harmless, empty (count=0) default
+// is used instead, and veda_rt_init_globals's own loop below simply
+// performs zero iterations.
+__attribute__((weak)) const struct veda_global_table_entry
+    __veda_global_table_meta[1] = {{0, 0, 0}};
+__attribute__((weak)) const uint64_t __veda_global_table_count = 0;
+
+// Real, empirically-derived requirement (Toolchain Milestone 13): unlike
+// veda_ocl_stack_d/veda_ocs_stack_d above (always reached from inside a
+// live compartment), this bootstrap routine runs ONCE, BEFORE the first
+// OCInvoke in the program -- in "wide open" PCC mode, with M19's purecap
+// enforcement not yet active (it is gated on veda_mode.veda_purecap OR
+// live OCInvoke-narrowing, VEDA_CORE_SPEC.md Section 3; neither holds
+// here). No __attribute__((veda_compartment)) needed or wanted: this
+// function's own ordinary prologue (a real, plain `sd`-based `ra` spill
+// if the compiler needs one) is genuinely safe here, unlike every OTHER
+// runtime helper in this file.
+void veda_rt_init_globals(void) {
+  for (uint64_t i = 0; i < __veda_global_table_count; i++) {
+    const struct veda_global_table_entry *e = &__veda_global_table_meta[i];
+    uint64_t table_slot_offset = i * 16; // kVedaCapTableSlotBytes, mirrored
+    if (e->region_selector == 0)
+      veda_mint_global_cap_rodata_asm(e->region_offset, e->size,
+                                      table_slot_offset);
+    else
+      veda_mint_global_cap_data_asm(e->region_offset, e->size,
+                                    table_slot_offset);
+  }
+}
+
+// Per-access load/store -- always reached from inside a live compartment
+// (Phase B1 only ever emits a call to these from a veda_compartment
+// -attributed function's own body), so both need the attribute, the
+// identical real reason veda_ocl_stack_d/veda_ocs_stack_d above do.
+uint64_t veda_ocl_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                           uint64_t size) __attribute__((veda_compartment));
+uint64_t veda_ocl_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                           uint64_t size) {
+  return veda_ocl_global_d_scratch_asm(table_slot_offset, access_offset, size);
+}
+
+void veda_ocs_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                       uint64_t size, uint64_t value) __attribute__((veda_compartment));
+void veda_ocs_global_d(uint64_t table_slot_offset, uint64_t access_offset,
+                       uint64_t size, uint64_t value) {
+  veda_ocs_global_d_scratch_asm(table_slot_offset, access_offset, size, value);
 }

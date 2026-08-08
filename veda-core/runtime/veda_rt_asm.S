@@ -126,3 +126,108 @@ veda_ocs_stack_d_scratch_asm:
     csetbounds c13, c13, a2
     ocs.d      c13, a1, a3
     ret
+
+# Toolchain Milestone 13: global/static (C 'int g;' / 'static int s;')
+# protection. Real, checked departure from CHERI's own literal
+# __cap_relocs mechanism (this project's real linker/clang have no
+# cap-reloc feature -- confirmed directly, see
+# TOOLCHAIN_MILESTONE_13_DESIGN.md Section 3): a compiler-emitted tuple
+# table (VedaShadowPropagation.cpp's own Phase B1) names every
+# compartment-touched global's own region/offset/size; a real per-global
+# capability is minted ONCE, at program bootstrap (before the first
+# OCInvoke, in "wide open" PCC mode -- purecap enforcement is not yet
+# active then, so these minting helpers need no veda_compartment
+# attribute at all, unlike every OTHER runtime helper in this file
+# reached from inside a live compartment), and cached into a small
+# in-memory capability table via OCS.C (Milestone 7, already
+# implemented/tested -- round-trips a full 128-bit TAGGED capability
+# through ordinary memory, exactly the primitive real CHERI's own
+# __cap_relocs mechanism needs). Every real, later access is then just
+# OCL.C (load the already-exact capability) + OCL.D/OCS.D -- no
+# OCA/CSetBounds at the access site at all, a real, load-bearing
+# difference from the stack-locals path above (which narrows fresh on
+# every single access).
+#
+# Register plan (grep-audited collision-free against the whole
+# compiler/runtime .S corpus before picking, the same discipline
+# Milestones 11/12 used for C15/C13 -- confirmed this session that EVERY
+# CRF register 0-15 already has SOME real use in this project's hand
+# -written corpus; C8/C9/C10/C11 are exclusively used by
+# runtime/veda_sched_asm.S's own scheduler switcher, safe here because
+# this milestone's own standalone verification program never invokes the
+# scheduler -- a real, honestly-named residual risk for any FUTURE
+# program combining globals-protection with multi-threading, see
+# TOOLCHAIN_MILESTONE_13_RESULTS.md):
+#   c8  -- bootstrap-only, holds the .rodata SOURCE region capability
+#          (bound once by the entry point's own ODT-Populate+Bind
+#          ceremony, before veda_rt_init_globals runs; never touched
+#          again afterward).
+#   c9  -- bootstrap-only, holds the .data+.bss SOURCE region capability.
+#   c10 -- transient scratch, reused across TWO non-overlapping roles
+#          (bootstrap minting always finishes before any per-access call
+#          begins, the identical "transient, safe to reuse across
+#          non-overlapping call sites" convention C0-C13 already
+#          establish throughout this whole project): the OCA-then-
+#          CSetBounds intermediate during minting, AND the OCL.C-loaded
+#          per-global capability at every real access site.
+#   c11 -- PERSISTENT, holds the capability-TABLE region's own capability
+#          (bound once at bootstrap, held across every subsequent
+#          OCInvoke/OCRETURN crossing for the program's entire remaining
+#          life) -- deliberately NOT c13 (Milestone 12's own stack-locals
+#          scratch) or c15 (SSC), so this milestone's own verification
+#          test can trace-prove its own path caught a violation, not an
+#          accidental reuse of Milestone 12's.
+
+# void veda_mint_global_cap_rodata_asm(uint64_t region_offset /*a0*/,
+#                                       uint64_t size /*a1*/,
+#                                       uint64_t table_slot_offset /*a2*/)
+# Bootstrap-only: narrows c8 (the .rodata source region) to exactly this
+# one global's own bytes, then stores the result into capability-table
+# slot table_slot_offset (relative to c11) via OCS.C.
+.global veda_mint_global_cap_rodata_asm
+veda_mint_global_cap_rodata_asm:
+    oca        c10, c8, a0
+    csetbounds c10, c10, a1
+    ocs.c      c11, a2, c10
+    ret
+
+# void veda_mint_global_cap_data_asm(uint64_t region_offset /*a0*/,
+#                                     uint64_t size /*a1*/,
+#                                     uint64_t table_slot_offset /*a2*/)
+# Mirror-image of the above, narrowing c9 (the .data+.bss source region)
+# instead.
+.global veda_mint_global_cap_data_asm
+veda_mint_global_cap_data_asm:
+    oca        c10, c9, a0
+    csetbounds c10, c10, a1
+    ocs.c      c11, a2, c10
+    ret
+
+# uint64_t veda_ocl_global_d_scratch_asm(uint64_t table_slot_offset /*a0*/,
+#                                         uint64_t access_offset /*a1*/,
+#                                         uint64_t size /*a2, accepted but
+#                                         unused -- see below*/)
+# `size` is accepted for ABI symmetry with the store variant and with
+# veda_rt_ocl_stack_d's own established 3-argument shape, but is not
+# actually consulted here: the capability OCL.C loads from the table is
+# already exactly bounded to this one global's own real size (minted
+# once, at bootstrap, above) -- real hardware's own veda_check_access
+# already bounds-checks access_offset against THAT capability's own
+# Length field, a second, redundant software-side size check would add
+# nothing.
+.global veda_ocl_global_d_scratch_asm
+veda_ocl_global_d_scratch_asm:
+    ocl.c c10, c11, a0
+    ocl.d a0, c10, a1
+    ret
+
+# void veda_ocs_global_d_scratch_asm(uint64_t table_slot_offset /*a0*/,
+#                                     uint64_t access_offset /*a1*/,
+#                                     uint64_t size /*a2, accepted but
+#                                     unused, see above*/,
+#                                     uint64_t value /*a3*/)
+.global veda_ocs_global_d_scratch_asm
+veda_ocs_global_d_scratch_asm:
+    ocl.c c10, c11, a0
+    ocs.d c10, a1, a3
+    ret
