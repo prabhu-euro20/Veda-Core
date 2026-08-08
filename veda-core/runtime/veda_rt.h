@@ -120,13 +120,21 @@ bool veda_ocs_stack_d(uint64_t region_offset, uint64_t access_offset,
 // TOOLCHAIN_MILESTONE_13_DESIGN.md for the full real reasoning). Must be
 // called exactly once, before the first OCInvoke in the program.
 //
-// The table itself: a fixed 16-slot (256-byte) upper bound, not exactly-
-// sized to any one program's own real global count -- a real, named,
-// not-yet-resolved open risk (TOOLCHAIN_MILESTONE_13_RESULTS.md). The
-// hand-written entry point's own _start references this array directly
-// by symbol name (a plain `la`), giving it its own dedicated Object_ID
+// The table itself: Toolchain Milestone 15 made this exactly-sized to
+// the real program's own global count (VedaShadowPropagation.cpp's own
+// Phase B1 emits the real, strong definition; veda_rt.c's weak fallback
+// only covers a program that references the symbol without the pass
+// having found any qualifying global). Incomplete array type -- its real
+// size is decided at compile time by whichever definition (pass-emitted
+// or weak fallback) the linker resolves, not by this declaration; no C
+// code in this codebase does `sizeof(g_veda_global_cap_table)` (confirmed
+// by grep before making this change), so this is safe. The hand-written
+// entry point's own _start references this array directly by symbol name
+// (a plain `la`) and reads `__veda_global_cap_table_bytes` (below) for
+// its own real byte length, giving it its own dedicated Object_ID
 // distinct from the .data+.bss source region.
-extern uint8_t g_veda_global_cap_table[16 * 16];
+extern uint8_t g_veda_global_cap_table[];
+extern const uint64_t __veda_global_cap_table_bytes;
 void veda_rt_init_globals(void);
 
 // Per-access load/store against an already-minted, table-resident

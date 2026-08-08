@@ -602,6 +602,39 @@ void VedaShadowPropagation::propagateGlobals(Module &M) {
       ConstantInt::get(I64Ty, Rows.size()), "__veda_global_table_count");
   (void)TableGV;
   (void)CountGV;
+
+  // Toolchain Milestone 15 (TOOLCHAIN_MILESTONE_13_DESIGN.md's own
+  // pre-named "concrete next design step" -- "exactly as many slots as
+  // the tuple table has entries, sized by the compiler pass itself, no
+  // separate policy needed"): emit the REAL, runtime-populated capability
+  // table (`g_veda_global_cap_table`) here too, exactly sized to
+  // Rows.size() * kVedaCapTableSlotBytes -- previously a fixed 16-slot
+  // (256-byte) upper bound hardcoded in runtime/veda_rt.c, unrelated to
+  // any one program's own real global count. Zero-initialized (not a
+  // ConstantArray like TableInit above): this array is populated at
+  // RUNTIME by veda_mint_global_cap_*_asm's own OCS.C writes, not at
+  // compile time -- ConstantAggregateZero is the correct LLVM
+  // zero-initializer for a mutable, not-yet-written array.
+  ArrayType *CapTableArrTy =
+      ArrayType::get(I8Ty, Rows.size() * kVedaCapTableSlotBytes);
+  auto *CapTableGV = new GlobalVariable(
+      M, CapTableArrTy, /*isConstant=*/false, GlobalValue::ExternalLinkage,
+      ConstantAggregateZero::get(CapTableArrTy), "g_veda_global_cap_table");
+  (void)CapTableGV;
+
+  // A companion i64 constant carrying the table's own real byte size --
+  // mirrors CountGV's own role exactly, but for the hand-written
+  // assembly entry point's own ODT-Populate Length field
+  // (veda_global_protect_entry.S), which cannot read an LLVM
+  // GlobalVariable's byte size directly (no linker-computed
+  // symbol-difference is set up for this array, unlike RegionOffset
+  // above) -- a real, load-once constant is the simplest correct
+  // mechanism, not a new idiom.
+  auto *CapTableBytesGV = new GlobalVariable(
+      M, I64Ty, /*isConstant=*/true, GlobalValue::ExternalLinkage,
+      ConstantInt::get(I64Ty, Rows.size() * kVedaCapTableSlotBytes),
+      "__veda_global_cap_table_bytes");
+  (void)CapTableBytesGV;
 }
 
 //===----------------------------------------------------------------------===//

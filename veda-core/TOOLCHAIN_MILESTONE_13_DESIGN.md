@@ -514,15 +514,12 @@ bootstrap-correctness checkpoint, since it had no bootstrap minting loop to chec
   routine? a convention every compartment entry point must call first, idempotently?). This is real,
   load-bearing runtime/linker-level design work this milestone's own toolchain-only framing cannot
   avoid, and is not yet resolved here.
-- **Capability-table sizing policy is unresolved.** This revision needs a small, fixed-size in-memory
-  table (one 16-byte slot per in-scope global), but nothing here yet specifies how that size is
-  decided — a fixed compile-time upper bound the compiler pass enforces (erroring or diagnosing if a
-  program has "too many" globals), or a linker-computed exact size (matching the count Phase B1 itself
-  determines at compile time, since the compiler already knows the exact global count when it emits
-  the tuple table)? The tuple table itself (Section 3) already needs exactly this same count, so the
-  natural answer is "exactly as many slots as the tuple table has entries, sized by the compiler pass
-  itself, no separate policy needed" — but this has not been implemented or tested, and is named here
-  as the concrete next design step, not assumed solved by this paragraph's own reasoning alone.
+- **RESOLVED (Toolchain Milestone 15, `TOOLCHAIN_MILESTONE_15_RESULTS.md`): capability-table sizing
+  policy.** Implemented exactly as this paragraph's own reasoning anticipated — "exactly as many slots
+  as the tuple table has entries, sized by the compiler pass itself, no separate policy needed." Phase
+  B1 now emits `g_veda_global_cap_table` directly as a `Rows.size()*16`-byte `GlobalVariable`, with a
+  weak-fallback default in `runtime/veda_rt.c` for programs that reference the symbol without the pass
+  finding any qualifying global. Verified in real generated IR, not assumed.
 - **Whether the ODT's 256-entry real budget (`rtl/MILESTONE_PLAN.md`, re-confirmed this session
   against `rtl/veda_core.tlv:994`'s own literal `[7:0]` truncation) has room for a *third*
   program-lifetime `Object_ID` (the capability-table region itself, on top of the first draft's

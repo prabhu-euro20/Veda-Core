@@ -77,14 +77,21 @@ _start:
     # -- capability-TABLE region -> c11 (PERSISTENT: held across every
     #    subsequent OCInvoke/OCRETURN crossing for the rest of the
     #    program's life, unlike c8/c9 above, which are bootstrap-only and
-    #    discarded the moment minting finishes). Length=0x100 (256B,
-    #    matching g_veda_global_cap_table's own real, hardcoded C array
-    #    size -- runtime/veda_rt.h/.c). Perms=0x000C (Load|Store: OCL.C
-    #    reads a slot at every access, OCS.C writes one during minting). --
+    #    discarded the moment minting finishes). Toolchain Milestone 15:
+    #    Length is no longer a hardcoded 0x100 -- g_veda_global_cap_table
+    #    is now exactly sized by VedaShadowPropagation.cpp's own Phase B1
+    #    (runtime/veda_rt.h/.c), so its real byte length is read from the
+    #    compiler-emitted __veda_global_cap_table_bytes constant instead
+    #    (mirrors CountGV's own role for veda_rt_init_globals's loop
+    #    bound). Perms=0x000C (Load|Store: OCL.C reads a slot at every
+    #    access, OCS.C writes one during minting). --
+    la   t2, __veda_global_cap_table_bytes
+    ld   t2, 0(t2)         # t2 := real byte size of g_veda_global_cap_table
+    slli t2, t2, 16
+    ori  t2, t2, 0x000C    # Perms=Load|Store
     la   t0, g_veda_global_cap_table
     slli t0, t0, 32
-    li   t1, 0x0100000C   # Length=0x100, Perms=Load|Store
-    or   t0, t0, t1
+    or   t0, t0, t2
     li   x1, 424
     mv   x2, t0
     .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- CAP_TABLE_REGION

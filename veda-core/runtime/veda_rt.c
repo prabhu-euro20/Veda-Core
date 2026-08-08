@@ -119,19 +119,26 @@ bool veda_ocs_d(veda_obj_t obj, uint64_t offset, uint64_t value) {
   return true;
 }
 
-// Toolchain Milestone 13: the in-memory capability table itself -- a
-// real, ordinary .bss-resident array, its own address given its own
-// dedicated Object_ID by the entry point's own hand-written ceremony
-// (distinct from the .data+.bss SOURCE region -- the table is a real
-// allocation with its own bounds, not literally "inside" either source
-// region conceptually, even though it happens to physically live in
-// .bss). Non-static (external linkage) so the hand-written entry point's
-// own _start can reference it by name via a plain `la`. Fixed-size upper
-// bound (16 slots = 256 bytes), not exactly-sized to whatever a given
-// program's own Phase B1 tuple table actually needs -- a real, named,
-// not-yet-resolved open risk (TOOLCHAIN_MILESTONE_13_RESULTS.md), not
-// silently assumed sufficient for every future program.
-uint8_t g_veda_global_cap_table[16 * 16];
+// Toolchain Milestone 15: the in-memory capability table itself -- now
+// emitted directly by VedaShadowPropagation.cpp's own Phase B1, exactly
+// sized to the real program's own global count (Rows.size() * 16 bytes),
+// the fix TOOLCHAIN_MILESTONE_13_DESIGN.md's own "concrete next design
+// step" already named ("exactly as many slots as the tuple table has
+// entries, sized by the compiler pass itself"). This WEAK definition is
+// only the fallback default for a program that references the symbol
+// (an M13/M15-style hand-written entry point's own `la`) without the
+// pass having found any qualifying global -- real, strong-linkage
+// emission from the pass always wins when present, the identical
+// real C/ELF weak-symbol mechanism __veda_global_table_meta/_count
+// already rely on below. One slot (16 bytes), matching those two
+// symbols' own minimal, harmless defaults.
+__attribute__((weak)) uint8_t g_veda_global_cap_table[16];
+// Companion byte-size constant for the same weak-fallback scenario --
+// the hand-written entry point's own ODT-Populate Length field reads
+// this directly (veda_global_protect_entry.S), mirroring
+// __veda_global_table_count's own role for veda_rt_init_globals's loop
+// bound above.
+__attribute__((weak)) const uint64_t __veda_global_cap_table_bytes = 16;
 
 // Toolchain Milestone 12: no software bind-failure path exists here --
 // c15 is already established by the compartment's own entry point (never

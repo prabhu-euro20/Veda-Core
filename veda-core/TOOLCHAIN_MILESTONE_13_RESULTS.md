@@ -176,18 +176,27 @@ Mutation-tested the check itself (temporarily expecting `999` instead of `113`):
   combines globals-protection with the scheduler; implement at the next real trigger (that combined test
   becoming necessary, or this milestone's own register choice being grep-audited and finalized).
 - **Extern globals** (`isDeclaration()==true`), especially incomplete-array-typed ones (this project's
-  own real `extern char _end[];`) — left completely unrewritten, not silently mis-sized.
-- **Global accesses inside non-`veda_compartment`-attributed functions**, even if transitively
-  reachable from a live compartment — left untouched, a genuinely new policy question Phase B0 never
-  faced.
+  own real `extern char _end[];`) — left completely unrewritten, not silently mis-sized. **Design
+  direction now decided** (`TOOLCHAIN_MILESTONE_16_EXTERN_GLOBALS_DECISION.md`, grounded in real CHERI's
+  own `cheri_init_globals.h` precedent for zero-size relocations): route through a table-cached,
+  whole-source-region fallback capability, not per-symbol bounding. **Implementation deferred** — the
+  one real extern-global usage in this codebase (`_end`) is bootstrap-only and never reachable from a
+  live compartment, so no real test exists yet to build against.
+- **RESOLVED (`TOOLCHAIN_MILESTONE_17_UNATTRIBUTED_ACCESS_POLICY.md`): global accesses inside
+  non-`veda_compartment`-attributed functions.** Confirmed, from both `VedaShadowPropagation.cpp`'s own
+  gating logic and `veda_regs.sail`'s own unconditional `veda_purecap` rule, that this is a safe,
+  fail-closed gap (hard-traps, same mechanism as Milestone 10's own callee-saved-spill finding) — not a
+  security bypass. Generalizes Milestone 12's own "runtime helpers reached from a compartment must be
+  attributed" finding into the general rule for this whole architecture. A compile-time diagnostic (vs.
+  today's runtime trap) remains real, unbuilt future work.
 - **Subobject/struct-field-internal bounds** — same CHERI `CBM_Conservative` scope boundary Milestone
   12 already drew.
 - **A linker-emitted relocation mechanism** (CHERI's own literal `__cap_relocs`) — investigated and
   rejected for v1 given this project's real toolchain; the compiler-emitted-table approach is the v1
   answer, revisitable if the toolchain ever grows real linker-level capability-relocation support.
-- **Capability-table sizing** — a fixed 16-slot (256-byte) upper bound, not exactly-sized to any one
-  program's own real global count (which the compiler pass itself already knows at compile time — the
-  natural, not-yet-implemented fix).
+- **RESOLVED (Toolchain Milestone 15, `TOOLCHAIN_MILESTONE_15_RESULTS.md`): capability-table sizing.**
+  `g_veda_global_cap_table` is now emitted directly by Phase B1, exactly sized to `Rows.size()*16` bytes
+  — confirmed in real generated IR (32 bytes for a real 2-global test, not the old fixed 256).
 - **Multiple independent compartments in one program concurrently sharing a global** under the ODT's
   exclusive-by-default owner-hart Bind policy — no existing test corpus exercises multiple live
   compartments in one program at all.
