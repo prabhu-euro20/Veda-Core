@@ -148,6 +148,9 @@
     }
   },
   "memory": {
+    // 64 for RV64 (no S-mode/Sv39/48/57 address translation is
+    // implemented, so physical == the full xlen address space).
+    "physaddr_bits": 64,
     "pmp": {
       "grain": 0,
       // This specifies the number of PMP entries present.
@@ -188,19 +191,23 @@
         // whether it generates an access fault (use `"AccessFault"`)
         // or a misaligned exception (use `"AlignmentException"`).
         "lrsc": "AccessFault",
-        // Similarly, a misaligned AMO currently always faults, and this field
-        // can specify either `"AccessFault"` or `"AlignmentException"`.
-        "amo": "AccessFault"
+        // Similarly, a misaligned AMO can be configured with the same
+        // option values as load_store/vector above (schema changed this
+        // from a bare string to the None/Some wrapper -- kept the same
+        // always-fault behavior as before via `{"Some": "AccessFault"}`).
+        "amo": {
+          "Some": "AccessFault"
+        }
       },
       // If a misaligned access was specified to have no fault in `exceptions` above, the
       // fields below specify how it is handled.
       //
       // Memory accesses that span multiple naturally aligned
-      // 2^allowed_within_exp sized regions will be split into multiple
+      // 2^default_allowed_within_exp sized regions will be split into multiple
       // memory operations. 0 means all misaligned accesses will be split.
       // The maximum value is 12 (one page).
-      "allowed_within_exp": 0,
-      // If the access gets split due to `allowed_within_exp` then the size
+      "default_allowed_within_exp": 0,
+      // If the access gets split due to `default_allowed_within_exp` then the size
       // of the operations will be one byte if `byte_by_byte` is set, otherwise
       // they will be the maximum size possible based on the alignment. For
       // example a 4-byte access to address 0x2 will use two 2-byte operations.
@@ -251,6 +258,8 @@
             "amo": "AccessFault"
           },
           "atomic_support": "AMONone",
+          "misaligned_atomicity_granule_size_exp": 0,
+          "vector_misaligned_atomicity_granule_size_exp": 0,
           "reservability": "RsrvNone",
           "supports_cbo_zero": false,
           "supports_pte_read": false,
@@ -287,6 +296,8 @@
             "amo": "AccessFault"
           },
           "atomic_support": "AMONone",
+          "misaligned_atomicity_granule_size_exp": 0,
+          "vector_misaligned_atomicity_granule_size_exp": 0,
           "reservability": "RsrvNone",
           "supports_cbo_zero": false,
           "supports_pte_read": false,
@@ -323,6 +334,8 @@
             "amo": "AccessFault"
           },
           "atomic_support": "AMONone",
+          "misaligned_atomicity_granule_size_exp": 0,
+          "vector_misaligned_atomicity_granule_size_exp": 0,
           "reservability": "RsrvNone",
           "supports_cbo_zero": false,
           "supports_pte_read": false,
@@ -540,6 +553,9 @@
       "supported": false
     },
     "Zaamo": {
+      "supported": false
+    },
+    "Zama16b": {
       "supported": false
     },
     "Zabha": {
