@@ -75,7 +75,8 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
 ## Real measured results
 
 (from committed Sail + RTL simulations)
-- Deterministic tag checks: `P(bypass) = 0` (vs. Arm MTE's probabilistic
+- Deterministic tag checks: `P(success after k attempts) = 0` for a
+  brute-force capability forgery attempt (vs. Arm MTE's probabilistic
   tags) — see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
 - OCInvoke (compartment crossing): `38 + 3N` cycles vs. software `1 + 9N`,
   where `N` is the number of crossings — Veda-Core pays a larger one-time
@@ -102,6 +103,17 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
   `veda-core/SYNTHESIS_CRITICAL_PATH_STUDY.md`.
 - Fixed object-bind overhead measured at `+10 cycles` (amortizes to <2%
   by N=64) — see `veda-core/OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`.
+- TCM Fast-Path (Milestone 24): under real DRAM-latency modeling, a
+  repeated capability-register rebind pattern (register pressure past the
+  16-register capacity) pays a real, linearly-scaling cost — real CHERI's
+  own equivalent likely rides an ordinary cache, something Veda-Core's
+  deliberately cache-less design doesn't do by default. A small, static,
+  compile-time-declared on-chip tier (grounded in GhostRider, ASPLOS 2015)
+  closes that gap to **zero added latency** for register-pressure working
+  sets up to 17 objects — without reopening the cache-timing side channel
+  real CHERI's own official technical report admits it doesn't fully close
+  — see `veda-core/rtl/MILESTONE_24_RESULTS.md` and
+  `veda-core/CRF_ARCHITECTURE_ALIGNMENT_VERDICT.md`.
 - Five real attack-demo classes, each run on both traditional RV64I and
   Veda-Core in real Icarus Verilog simulation, real register/trap values
   read directly from the run, not theoretical:
@@ -130,10 +142,11 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
   not yet part of the permanent, committed regression corpus.
 
 ## Verification status
-- Sail formal model: 30/30 self‑checking tests (re-run during this audit;
-  see `EVIDENCE_INDEX.md` for the exact commands and outputs).
-- RTL implementation (TL‑Verilog → SystemVerilog): milestone
-  regressions pass; per-milestone results live in `veda-core/rtl/`.
+(as of Milestone 24, 2026-08-08 — see `veda-core/rtl/MILESTONE_24_RESULTS.md` for the exact commands
+and outputs this was re-run with)
+- Sail formal model: 58/58 self‑checking tests.
+- RTL milestone smoke-test regression: 49/49 (46 pre-existing + 3 from Milestone 24), zero
+  regressions; per-milestone results live in `veda-core/rtl/`.
 - RISC‑V ACT4 RV64I conformance: 51/51, zero regressions (run
   directly against `veda_core.tlv`; see `veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`).
 
@@ -151,7 +164,8 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
 ## Quick reproduction notes
 - The RTL and Sail models are in `veda-core/rtl/` and `toolchain/sail-riscv/`.
 - Primary reproduction scripts live under `veda-core/` and
-   `veda-core/rtl/` (for example `verification.sh`, `rtl/run_act4_tests.sh`).
+   `veda-core/rtl/` (for example `veda-core/verification.sh`,
+   `veda-core/rtl/run_act4_tests.sh`).
 - Results reported above come from Icarus Verilog simulations and the
    Sail executable model; no FPGA/ASIC is claimed.
 
@@ -159,10 +173,14 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
 - All hardware results are from RTL simulation or Sail execution; there
   is no silicon or FPGA bitstream in this repo yet.
 - Energy overhead is real (≈+20% dynamic toggle proxy); see
-  `ENERGY_TOGGLE_ACTIVITY_STUDY.md` for methodology and numbers.
+  `veda-core/ENERGY_TOGGLE_ACTIVITY_STUDY.md` for methodology and numbers.
 - Memory-latency effects were explored via a parameterized TCM/DRAM
-  latency sweep; results are in `DRAM_TCM_LATENCY_STUDY.md` (TCM helps
-  only when objects are repeatedly re-bound, not for bind-once reuse).
+  latency sweep (`veda-core/DRAM_TCM_LATENCY_STUDY.md`); the original
+  sweep found TCM/SRAM placement helps only when objects are repeatedly
+  re-bound, not for bind-once reuse. Milestone 24 (TCM Fast-Path) has
+  since built a real, mutation-tested on-chip tier that closes this gap
+  to zero added latency for register-pressure working sets up to 17
+  objects — see `veda-core/rtl/MILESTONE_24_RESULTS.md`.
 - A real LLVM-based toolchain now exists (assembler, disassembler, a
   GDB stub with live capability-register visibility, and a SoftBound
   -style compiler pass that transparently retrofits ordinary C pointer
@@ -185,7 +203,7 @@ as real, reviewable commits — not a from-scratch reinvention):
 |---|---|---|
 | This repo | `github.com/prabhu-euro20/Veda-Core` | Sail formal-model spec source (via the sail-riscv fork below), TL-Verilog RTL, docs, tests, the compiler pass + runtime + demo programs |
 | LLVM/Clang fork | `github.com/prabhu-euro20/Veda-Core-LLVM` (branch `veda-core`) | Capability register class + all 36 Veda-Core instructions + disassembler + MC tests, layered on official `llvm/llvm-project` `release/21.x` |
-| Sail RISC-V fork | `github.com/prabhu-euro20/Veda-Core-sail-riscv` (branch `veda-core`) | The full Veda-Core formal model (Milestones 1-22) + a GDB Remote Serial Protocol stub with live capability-register visibility, layered on official `riscv/sail-riscv` |
+| Sail RISC-V fork | `github.com/prabhu-euro20/Veda-Core-sail-riscv` (branch `veda-core`) | The full Veda-Core formal model (Milestones 1-24, plus the Minimal OS Kernel A/B/C cooperative scheduler and SSC Stack-Spill Capability work) + a GDB Remote Serial Protocol stub with live capability-register visibility, layered on official `riscv/sail-riscv` |
 
 ### One-command setup
 
@@ -207,8 +225,8 @@ to preview, `--force` to rebuild, and individual named targets
 
 ```bash
 # 1. System prerequisites (Ubuntu/Debian; verified on this exact
-#    combination — see TOOLCHAIN_MILESTONE_2_RESULTS.md for the real,
-#    checked package versions)
+#    combination — see veda-core/TOOLCHAIN_MILESTONE_2_RESULTS.md for the
+#    real, checked package versions)
 sudo apt-get install -y clang llvm-dev cmake ninja-build build-essential opam
 opam init -y && opam install -y sail
 
