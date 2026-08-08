@@ -63,6 +63,13 @@ See `veda-core/VEDA_CORE_SPEC.md` for the full architecture and
 
 https://github.com/user-attachments/assets/a46c9a61-ef68-4ae5-8912-edf02b897364
 
+## Object-Binding Register-Pressure
+
+
+
+https://github.com/user-attachments/assets/1f00d227-2fec-4ce4-ab92-39dd3d7d0976
+
+
 
 ## Compartmentalization Visualization
 
