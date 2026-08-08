@@ -133,8 +133,9 @@ Per the plan's own explicit scope: RTL mirror (needs no new instructions, so if 
 purely re-running this identical pattern against `veda_core.tlv`'s already-complete instruction
 set — not started this pass, matching the project's own Sail-then-RTL sequencing). Real fault
 recovery for the `unexpected_trap`/guard path (currently a clean fail-halt, not a recovery).
-Full GPR context save (only each thread's own counter register plus `mepc`/PCC-bounds are
-preserved across a yield; scratch temporaries are not). Preemptive (timer/interrupt-driven)
+~~Full GPR context save~~ **Resolved** — see `MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md`: all of
+x1-x31 now survive a yield, not just each thread's own counter register plus `mepc`/PCC-bounds.
+Preemptive (timer/interrupt-driven)
 scheduling — cooperative-`ecall`-yield only, per this initiative's own original scheduling
 decision. More than 2 threads, priorities, message queues, event channels, futexes, or the
 allocator — all real CHERIoT scheduler/allocator features, explicitly out of scope for this
