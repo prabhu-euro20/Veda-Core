@@ -129,12 +129,15 @@ PASS      vc_scheduler_cooperative_yield
 
 ## Not yet built
 
-Per the plan's own explicit scope: RTL mirror (needs no new instructions, so if ever done it is
-purely re-running this identical pattern against `veda_core.tlv`'s already-complete instruction
-set — not started this pass, matching the project's own Sail-then-RTL sequencing). Real fault
-recovery for the `unexpected_trap`/guard path (currently a clean fail-halt, not a recovery).
-~~Full GPR context save~~ **Resolved** — see `MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md`: all of
-x1-x31 now survive a yield, not just each thread's own counter register plus `mepc`/PCC-bounds.
+~~RTL mirror~~ **Resolved** — the original 3-dword scheduler mechanism was mirrored to
+`veda_core.tlv`/`rtl/sim/veda_smoke_m23_scheduler.S` (RTL Milestone C mirror), and the full
+GPR-context-save mechanism (below) has since been mirrored too — see `rtl/MILESTONE_25_RESULTS.md`
+(required one genuinely new RTL feature, the `mscratch` CSR, added and independently round-trip
+verified before use). Real fault recovery for the `unexpected_trap`/guard path (currently a clean
+fail-halt, not a recovery).
+~~Full GPR context save~~ **Resolved** — see `MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md` (Sail) and
+`rtl/MILESTONE_25_RESULTS.md` (RTL): all of x1-x31 now survive a yield, not just each thread's own
+counter register plus `mepc`/PCC-bounds.
 Preemptive (timer/interrupt-driven)
 scheduling — cooperative-`ecall`-yield only, per this initiative's own original scheduling
 decision. More than 2 threads, priorities, message queues, event channels, futexes, or the

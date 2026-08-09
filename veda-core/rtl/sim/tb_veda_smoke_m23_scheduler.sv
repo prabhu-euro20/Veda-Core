@@ -21,16 +21,28 @@ module tb;
     repeat (2) @(posedge clk);
     reset = 0;
 
-    repeat (700) begin
+    // RTL Milestone 25 mirror: raised from 700 -- the save/restore path
+    // now covers 31 GPRs per direction instead of 3, roughly 8x more
+    // OCL.D/OCS.D traffic per yield across the same 4 yields. Generous
+    // on purpose for the first real run; tighten only after observing
+    // actual cycles needed (this project's own established practice,
+    // MILESTONE_14_RESULTS.md).
+    repeat (5000) begin
       @(posedge clk);
       #1;
       cyc_cnt = cyc_cnt + 1;
     end
 
-    $display("THREAD_A counter (must be 2): x20=%0d", dut.CPU_Xreg_val_a0[20]);
-    $display("THREAD_B counter (must be 2): x21=%0d", dut.CPU_Xreg_val_a0[21]);
-    $display("THREAD_A bounds fidelity (must be 1): x22=%0d", dut.CPU_Xreg_val_a0[22]);
-    $display("THREAD_B bounds fidelity (must be 1): x26=%0d", dut.CPU_Xreg_val_a0[26]);
+    // NOTE: x20/x21/x22/x26 below are debug visibility only -- they
+    // reflect whichever thread's own eager-restore loop last ran
+    // (GPRs are now genuinely per-thread), NOT necessarily THREAD_A's
+    // own state. The real pass/fail gate is x27 alone, which itself
+    // depends on the memory-backed thread_a_ok/thread_b_ok flags
+    // (see final_check in the .S file), not these GPRs directly.
+    $display("THREAD_A counter (debug only, last-resumed thread's state): x20=%0d", dut.CPU_Xreg_val_a0[20]);
+    $display("THREAD_B counter (debug only, last-resumed thread's state): x21=%0d", dut.CPU_Xreg_val_a0[21]);
+    $display("THREAD_A bounds fidelity (debug only): x22=%0d", dut.CPU_Xreg_val_a0[22]);
+    $display("THREAD_B bounds fidelity (debug only): x26=%0d", dut.CPU_Xreg_val_a0[26]);
     $display("TSC round-trip fidelity (must be 1): x9=%0d", dut.CPU_Xreg_val_a0[9]);
     $display("overall sentinel (must be 0x600D): x27=0x%0h", dut.CPU_Xreg_val_a0[27]);
 

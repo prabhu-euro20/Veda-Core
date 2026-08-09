@@ -723,18 +723,26 @@
          //  mtvec) and "read a value" (CSRRS with rs1=x0, the real
          //  `csrr` pseudo-instruction's own expansion), matching every
          //  trap-handler pattern already proven in this project's own
-         //  Sail-side tests). Only 4 CSR addresses are recognized --
-         //  the real, standard RISC-V M-mode addresses for mtvec/mepc/
-         //  mcause/mtval (0x305/0x341/0x342/0x343) -- any other address
-         //  reads/writes as a hardwired 0, matching real RISC-V's own
-         //  WARL convention for an unimplemented CSR rather than
-         //  inventing new fault behavior for it.
+         //  Sail-side tests). Only 5 CSR addresses are recognized --
+         //  the real, standard RISC-V M-mode addresses for mtvec/mscratch/
+         //  mepc/mcause/mtval (0x305/0x340/0x341/0x342/0x343) -- any other
+         //  address reads/writes as a hardwired 0, matching real RISC-V's
+         //  own WARL convention for an unimplemented CSR rather than
+         //  inventing new fault behavior for it. mscratch (RTL Milestone
+         //  25 mirror) was added later than the other four, needed by the
+         //  full-GPR-context-save scheduler's own mscratch-based trap-
+         //  entry bootstrap (sail_tests/vc_scheduler_cooperative_yield.S)
+         //  -- a byte-for-byte structural copy of mtvec's own pattern
+         //  below, since mscratch shares mtvec's exact profile: nothing
+         //  but software CSRRW ever writes it, no hardware-capture logic
+         //  needed.
          // ─────────────────────────────────────────────────────────
          $csr_addr[11:0] = $instr[31:20];
          $is_csrrw = $op_is_system && ($funct3 == 3'b001);
          $is_csrrs = $op_is_system && ($funct3 == 3'b010);
          $is_csr_access = $is_csrrw || $is_csrrs;
          $csr_is_mtvec   = ($csr_addr == 12'h305);
+         $csr_is_mscratch = ($csr_addr == 12'h340);
          $csr_is_mepc    = ($csr_addr == 12'h341);
          $csr_is_mcause  = ($csr_addr == 12'h342);
          $csr_is_mtval   = ($csr_addr == 12'h343);
@@ -742,7 +750,7 @@
          // "Machine-level Custom read/write" address range (riscv-spec.pdf
          // Table 91, p.664, 0x7C0-0x7FF) -- verified against the real
          // spec, the same real range convention already trusted once for
-         // mtvec/mepc/mcause/mtval above, and the identical four
+         // mtvec/mscratch/mepc/mcause/mtval above, and the identical four
          // addresses already chosen and verified on the Sail side
          // (veda_regs.sail).
          $csr_is_veda_pcc_base     = ($csr_addr == 12'h7C0);
@@ -2598,6 +2606,7 @@
          //  fabricate a cause/value software didn't actually observe.
          // ─────────────────────────────────────────────────────────
          $csr_rdata[63:0] = $csr_is_mtvec  ? $mtvec :
+                             $csr_is_mscratch ? $mscratch :
                              $csr_is_mepc   ? $mepc :
                              $csr_is_mcause ? $mcause :
                              $csr_is_mtval  ? $mtval :
@@ -2643,6 +2652,13 @@
          $mtvec[63:0] = $reset ? 64'b0 :
                         (>>1$csr_write_en && >>1$csr_is_mtvec) ? >>1$csr_wdata :
                                                                   >>1$mtvec;
+         // RTL Milestone 25 mirror: mscratch, byte-for-byte structural
+         // copy of $mtvec's own pattern above -- no hardware-capture
+         // logic needed, nothing but software CSRRW ever writes it,
+         // exactly mtvec's own situation.
+         $mscratch[63:0] = $reset ? 64'b0 :
+                            (>>1$csr_write_en && >>1$csr_is_mscratch) ? >>1$csr_wdata :
+                                                                         >>1$mscratch;
          $mepc[63:0] = $reset ? 64'b0 :
                        // A real trap-taken event always wins over a
                        // same-cycle software CSRRW to mepc -- the two
