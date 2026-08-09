@@ -171,7 +171,7 @@ work that added the one new Sail test below)
 - Attack demos and analysis: `veda-core/ATTACK_DEMO_PORTFOLIO.md`
 - Roadmap and next steps: `veda-core/NEXT_STEPS_ROADMAP.md`
 - Formal verification plan: `veda-core/FORMAL_VERIFICATION_PLAN.md`
-- Milestone results (Sail + RTL): `veda-core/MILESTONE_V-A_RESULTS.md`, `veda-core/MILESTONE_V-B_RESULTS.md`, `veda-core/MILESTONE_14_RESULTS.md`, `veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`
+- Milestone results (Sail + RTL): `veda-core/MILESTONE_V-A_RESULTS.md`, `veda-core/MILESTONE_V-B_RESULTS.md`, `veda-core/MILESTONE_14_RESULTS.md`, `veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md` (full per-milestone history lives in `veda-core/` and `veda-core/rtl/`; most recent: `veda-core/MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md` (Sail) and `veda-core/rtl/MILESTONE_25_RESULTS.md` (RTL mirror))
  
 
 ## Quick reproduction notes
@@ -216,7 +216,7 @@ as real, reviewable commits -- not a from-scratch reinvention):
 |---|---|---|
 | This repo | `github.com/prabhu-euro20/Veda-Core` | Sail formal-model spec source (via the sail-riscv fork below), TL-Verilog RTL, docs, tests, the compiler pass + runtime + demo programs |
 | LLVM/Clang fork | `github.com/prabhu-euro20/Veda-Core-LLVM` (branch `veda-core`) | Capability register class + all 36 Veda-Core instructions + disassembler + MC tests, layered on official `llvm/llvm-project` `release/21.x` |
-| Sail RISC-V fork | `github.com/prabhu-euro20/Veda-Core-sail-riscv` (branch `veda-core`) | The full Veda-Core formal model (Milestones 1-24, plus the Minimal OS Kernel A/B/C cooperative scheduler and SSC Stack-Spill Capability work) + a GDB Remote Serial Protocol stub with live capability-register visibility, layered on official `riscv/sail-riscv` |
+| Sail RISC-V fork | `github.com/prabhu-euro20/Veda-Core-sail-riscv` (branch `veda-core`) | The full Veda-Core formal model (Milestones 1-25, plus the Minimal OS Kernel A/B/C cooperative scheduler -- now with full GPR context save across a yield, not just each thread's own counter register -- and SSC Stack-Spill Capability work) + a GDB Remote Serial Protocol stub with live capability-register visibility, layered on official `riscv/sail-riscv` |
 
 ### One-command setup
 
