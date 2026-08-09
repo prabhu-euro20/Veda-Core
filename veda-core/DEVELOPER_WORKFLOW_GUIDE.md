@@ -155,13 +155,18 @@ anything you wrote. This reservation is per-function and conditional: ordinary C
 `veda_compartment`-attributed function -- including every example in this guide -- is unaffected,
 and `c15` remains a fully free general-purpose capability register.
 
-**A known, non-fatal GDB startup warning on this machine**: `riscv64-unknown-elf-gdb` prints
-`Python initialization failed: failed to get the Python codec of the filesystem encoding` on
-every launch. This is not a new bug -- `TOOLCHAIN_MILESTONE_3_RESULTS.md` documents it: this
-machine's apt repository has moved past the `libpython3.12` version this prebuilt GDB needs, so
-its embedded-Python bootstrap degrades gracefully instead of fully initializing. Every RSP-based
-feature used in this guide (`target remote`, breakpoints, step/continue, register/memory read)
-works correctly regardless -- ignore the warning.
+**A known, non-fatal GDB startup warning**: on a machine where the system Python is newer than
+this prebuilt GDB's own embedded-Python bootstrap expects, `riscv64-unknown-elf-gdb` prints a real
+wall of diagnostic text on every launch -- `Could not find platform independent libraries <prefix>`,
+`Could not find platform dependent libraries <exec_prefix>`, a full `Python path configuration:`
+dump (`PYTHONHOME`, `PYTHONPATH`, `sys.path`, etc., ~20 lines), ending with `Python initialization
+failed: failed to get the Python codec of the filesystem encoding`. This is not a new bug --
+`TOOLCHAIN_MILESTONE_3_RESULTS.md` documents it: the embedded-Python bootstrap degrades gracefully
+instead of fully initializing when it can't find a compatible system Python. Whether you see this
+at all, and how much of it, depends on your own machine's installed Python version -- if you do,
+it ends with that same `Python initialization failed...` line. Every RSP-based feature used in this
+guide (`target remote`, breakpoints, step/continue, register/memory read) works correctly
+regardless -- ignore the whole block if your session ends the same way.
 
 ## 5. Debugging a real hardware trap -- and why GDB alone can't show you `mcause`/`mtval`
 

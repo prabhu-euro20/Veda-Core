@@ -221,7 +221,7 @@ as real, reviewable commits — not a from-scratch reinvention):
 ### One-command setup
 
 ```bash
-git clone git@github.com:prabhu-euro20/Veda-Core.git
+git clone https://github.com/prabhu-euro20/Veda-Core.git
 cd Veda-Core
 ./toolchain/setup.sh          # clones the two forks above, builds everything,
                                # compiles + runs the real end-to-end demo
@@ -250,10 +250,16 @@ eval $(opam env)
 
 # 2. The real, official riscv64-unknown-elf-{gcc,as,ld,gdb} toolchain --
 #    prebuilt, unmodified (`.insn` pseudo-ops already assemble every
-#    real Veda-Core encoding with zero patches needed)
-wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2026.07.15/riscv64-elf-ubuntu-24.04-gcc.tar.xz
+#    real Veda-Core encoding with zero patches needed). The ubuntu-22.04
+#    release build is used deliberately, not ubuntu-24.04: confirmed via
+#    `objdump -T` that the 24.04 build needs GLIBC 2.38+ (only Ubuntu
+#    23.10+/24.04+, roughly), while the 22.04 build needs only GLIBC
+#    2.34+ (Ubuntu 22.04+, Debian 12+, Fedora 35+) -- same toolchain
+#    version, same `ld`/`gcc` behavior (re-linked and re-ran the Section
+#    1 demo with both builds' `ld` to confirm), just a lower glibc floor.
+wget https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2026.07.15/riscv64-elf-ubuntu-22.04-gcc.tar.xz
 mkdir -p toolchain/riscv-collab-gcc
-tar xf riscv64-elf-ubuntu-24.04-gcc.tar.xz -C toolchain/riscv-collab-gcc
+tar xf riscv64-elf-ubuntu-22.04-gcc.tar.xz -C toolchain/riscv-collab-gcc
 # real binaries land at toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-*
 
 # 3. Sail RISC-V simulator (the Veda-Core formal model + GDB stub)

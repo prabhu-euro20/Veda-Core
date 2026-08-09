@@ -47,9 +47,14 @@ SAIL_RISCV_REPO="https://github.com/prabhu-euro20/Veda-Core-sail-riscv.git"
 # `tar tf` before ever trusting this URL: the tarball's own top-level
 # directory is already `riscv/`, matching this project's own established
 # `toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-*` path
-# exactly -- no --strip-components needed.
+# exactly -- no --strip-components needed. Uses the ubuntu-22.04 release
+# build, not ubuntu-24.04: confirmed via `objdump -T` that 24.04's build
+# needs GLIBC 2.38+ (only Ubuntu 23.10+/24.04+, roughly) while 22.04's
+# build needs only GLIBC 2.34+ (Ubuntu 22.04+, Debian 12+, Fedora 35+) --
+# same toolchain version and `ld`/`gcc` behavior (re-linked and re-ran a
+# real demo with both builds' `ld` to confirm), just a lower glibc floor.
 GNU_TOOLCHAIN_TAG="2026.07.15"
-GNU_TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${GNU_TOOLCHAIN_TAG}/riscv64-elf-ubuntu-24.04-gcc.tar.xz"
+GNU_TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${GNU_TOOLCHAIN_TAG}/riscv64-elf-ubuntu-22.04-gcc.tar.xz"
 BRANCH=veda-core
 
 DRY_RUN=0
