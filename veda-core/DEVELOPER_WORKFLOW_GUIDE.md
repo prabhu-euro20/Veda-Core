@@ -5,12 +5,14 @@ for anyone who wants to write their own high-level C code against this architect
 just read about it. Every command below is exactly what was run, on this machine, to produce the
 results quoted -- nothing here is aspirational.
 
-**Last verified:** 2026-08-09, against commit `985c958` -- re-run end to end in a fresh directory
-(`/home/prabhu/test`), all six sections, after fixing two real bugs this pass found (missing
-`+xveda` in `CC_FLAGS`, missing `compiler/my_trap_demo.c`) and updating the scope note below,
-which had fallen behind Toolchain Milestones 11-17. If you hit a command that doesn't match this
-guide, that almost certainly means more milestones have landed since -- check `git log` for
-commits touching `runtime/`, `compiler/`, or `toolchain/llvm-project/` after this date.
+**Last verified:** 2026-08-09, against commit `e10b310` -- Sections 2-4's build/run/GDB commands
+were re-run end to end after replacing every hardcoded `/home/prabhu/makerchip/rva23-core/...` path
+with `$REPO_ROOT`-derived ones (computed via `pwd` right after `cd`ing into wherever the repo is
+actually cloned) -- a real, previously-shipped bug: this guide's own copy-pasteable commands only
+worked on the one machine they were written on, and would not have worked for an external
+contributor cloning this repo anywhere else. If you hit a command that doesn't match this guide,
+that almost certainly means more milestones have landed since -- check `git log` for commits
+touching `runtime/`, `compiler/`, or `toolchain/llvm-project/` after this date.
 
 This guide assumes the toolchain is already built (`./toolchain/setup.sh`, see the top-level
 `README.md`).
@@ -74,20 +76,21 @@ advanced compiler-plugin build pipeline. See Section 7 below before reaching for
 
 ## 2. Build it (works from any directory)
 
-`VEDA_CORE` below (and `LLVM`/`LD`/`SIM`/`GDB` later) is the real, literal path on the machine
-this guide was verified against -- its own top-level directory happens to be named `rva23-core`,
-predating this repo's current `Veda-Core` name on GitHub. If you cloned via the top-level
-`README.md`'s own one-command setup, your checkout is named `Veda-Core/`, not `rva23-core/` --
-substitute your own clone's actual path here (e.g. `~/Veda-Core/veda-core`) before running these.
+Every path below is derived from `REPO_ROOT`, computed with `pwd` right after you `cd` into
+wherever you actually cloned this repo -- nothing here is tied to any one machine, username, or
+clone-directory name (`git clone`'s own default, per the top-level `README.md`, is `Veda-Core/`,
+but nothing below assumes that specific name either):
 
 ```bash
-VEDA_CORE=/home/prabhu/makerchip/rva23-core/veda-core
+cd /path/to/your/clone/of/this/repo   # wherever you actually cloned it
+REPO_ROOT="$(pwd)"
+VEDA_CORE="$REPO_ROOT/veda-core"
 
-LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
+LLVM="$REPO_ROOT/toolchain/llvm-project/build/bin"
 CLANG=$LLVM/clang
 MC=$LLVM/llvm-mc
-LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
-SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
+LD="$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld"
+SIM="$REPO_ROOT/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim"
 CFG=$VEDA_CORE/sail_tests/veda_test_sail.json
 
 # -Xclang -target-feature -Xclang +xveda is required: without it, clang's backend crashes
@@ -129,7 +132,7 @@ progress" beyond a single pass/fail code means either encoding results into dist
 ## 4. Debugging with real capability-register visibility
 
 ```bash
-GDB=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-gdb
+GDB="$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-gdb"   # from Section 2
 
 $SIM --config $CFG --gdbstub 9998 /tmp/my_program.elf &
 $GDB -ex "target remote :9998" /tmp/my_program.elf
