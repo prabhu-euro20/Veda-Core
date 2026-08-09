@@ -1,18 +1,18 @@
-# Veda-Core — Object-Centric, Address-Less, Capability-Based RISC-V Extension
+# Veda-Core -- Object-Centric, Address-Less, Capability-Based RISC-V Extension
 
 Veda-Core is a RISC-V processor extension that closes one of the oldest,
 most persistent security holes in computing: programs using raw memory
 addresses that can be guessed, forged, or reused after being freed. Instead of addresses, software
 works with `Object_ID`s that the hardware checks on every single memory
-access — enforcing **memory safety** automatically, and keeping different
+access -- enforcing **memory safety** automatically, and keeping different
 parts of a program isolated from each other in hardware
 (**compartmentalization**), deterministically, every time.
 
 ## What is Veda-Core
 
 Traditional processor architectures treat memory as flat bytes at raw
-addresses: a raw load/store instruction — `SD` on RISC-V, `MOV [addr], reg`
-on x86, `STR` on Arm — has no bounds check, no tag check, no
+addresses: a raw load/store instruction -- `SD` on RISC-V, `MOV [addr], reg`
+on x86, `STR` on Arm -- has no bounds check, no tag check, no
 use-after-free detection built into the instruction itself, on any
 mainstream architecture's own base ISA. Veda-Core replaces that contract
 at the ISA level, built on five design pillars:
@@ -21,33 +21,33 @@ at the ISA level, built on five design pillars:
   Software holds an `Object_ID`, never a raw address, for memory-safety
   purposes.
 - **Address-less**: no raw software address is used in ISA/ABI-visible
-  memory-safety semantics — software works only with an `Object_ID` and a
+  memory-safety semantics -- software works only with an `Object_ID` and a
   relative `Offset`. Because of that, an object can physically move in
   memory (`Rebind`) without software changing a single bit: RTL
   Milestone 8 relocated a real object to a new physical address, and the
   capability register's own untouched `Offset` correctly followed it
   there on the very next access (`veda-core/rtl/MILESTONE_8_RESULTS.md`).
 - **Capability-based**: software's `Object_ID` is looked up in a flat,
-  system-wide Object Descriptor Table (ODT) — hardware's own directory of
-  every object's location and size — and loaded into a 128-bit capability
+  system-wide Object Descriptor Table (ODT) -- hardware's own directory of
+  every object's location and size -- and loaded into a 128-bit capability
   register: a tamper-proof access pass combining where the object is
   (`Base`), how big it is (`Length`), where within it the program is
   currently pointing (`Offset`), a hidden validity marker (`Tag`), and a
   version number that catches stale references (generation counter). Like
   a key only a locksmith can cut, a capability can only be produced by
   real, authorized hardware operations (`Object-Bind`, `OCA` [Object
-  Capability Adjust], ...) — software can never fabricate one by writing
+  Capability Adjust], ...) -- software can never fabricate one by writing
   arbitrary bits into the register (see the arbitrary-pointer-forgery
   result below).
 - **Deterministic**: every access is checked in hardware, every time, with
-  zero software-visible probability of bypass (`P(bypass) = 0` — not just
-  rare, it cannot happen at all — vs. Arm MTE's probabilistic tag
+  zero software-visible probability of bypass (`P(bypass) = 0` -- not just
+  rare, it cannot happen at all -- vs. Arm MTE's probabilistic tag
   matching, where a narrow 4-bit tag can coincidentally collide).
 - **Single, global object namespace**: the ODT is one flat, system-wide
-  table, not partitioned per process — an `Object_ID` means the same thing
+  table, not partitioned per process -- an `Object_ID` means the same thing
   everywhere in the system.
 
-None of this is a brand-new idea invented from scratch — flat, system-wide,
+None of this is a brand-new idea invented from scratch -- flat, system-wide,
 ID-indexed capability tables were explored by real 1970s-80s hardware (the
 Plessey System 250, the Cambridge CAP computer) before the field moved on,
 for throughput and cost reasons specific to that era. Veda-Core is a
@@ -89,42 +89,42 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
 (from committed Sail + RTL simulations)
 - Deterministic tag checks: `P(success after k attempts) = 0` for a
   brute-force capability forgery attempt (vs. Arm MTE's probabilistic
-  tags) — see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
+  tags) -- see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
 - OCInvoke (compartment crossing): `38 + 3N` cycles vs. software `1 + 9N`,
-  where `N` is the number of crossings — Veda-Core pays a larger one-time
+  where `N` is the number of crossings -- Veda-Core pays a larger one-time
   setup cost (38) but a 3x cheaper cost per crossing (3 vs 9), winning
-  outright past N≈6 — see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
+  outright past N≈6 -- see `veda-core/REAL_MATH_QUANTITATIVE_COMPARISON.md`.
 - OCJALR (protected-return-jump): `7 cycles` vs. naive `10 cycles`
-  (≈−30%) — "naive" means hand-writing the check as 4 separate
+  (≈−30%) -- "naive" means hand-writing the check as 4 separate
   instructions (`CGetTag`+`beqz`+`CUnseal`+`CGetAddr`), which a
   programmer can forget to include; `OCJALR` collapses all of it into
-  one atomic, hardware-enforced instruction — see
+  one atomic, hardware-enforced instruction -- see
   `veda-core/rtl/MILESTONE_17_RESULTS.md`.
 - Object-descriptor construction (`POPULATE_FAST`): `6N+3` vs `10N`
-  (−32.5% @ N=4) — here `N` is the number of objects populated from the
+  (−32.5% @ N=4) -- here `N` is the number of objects populated from the
   same Length/Permissions template; the old way rebuilds a packed 64-bit
   descriptor per object (10 instructions), `POPULATE_FAST` sets
   Length/Perms once in a CSR and only loads Base fresh per object (6
-  instructions) — see `veda-core/rtl/MILESTONE_18_RESULTS.md`.
+  instructions) -- see `veda-core/rtl/MILESTONE_18_RESULTS.md`.
 - Critical check chain shorter than plain loads: `95 vs 114` logic-gate
-  levels — a gate-level synthesis measurement of the longest
+  levels -- a gate-level synthesis measurement of the longest
   combinational path (Yosys), not cycle count. Despite running 5
   security checks (Tag, staleness, Seal, Permission, Bounds), Veda-Core's
   `OCL.D` path is shorter because the checks run in parallel with the
-  address computation, not in series before it — see
+  address computation, not in series before it -- see
   `veda-core/SYNTHESIS_CRITICAL_PATH_STUDY.md`.
 - Fixed object-bind overhead measured at `+10 cycles` (amortizes to <2%
-  by N=64) — see `veda-core/OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`.
+  by N=64) -- see `veda-core/OBJECT_CENTRIC_VS_TRADITIONAL_BENCHMARK.md`.
 - TCM Fast-Path (Milestone 24): under real DRAM-latency modeling, a
   repeated capability-register rebind pattern (register pressure past the
-  16-register capacity) pays a real, linearly-scaling cost — real CHERI's
+  16-register capacity) pays a real, linearly-scaling cost -- real CHERI's
   own equivalent likely rides an ordinary cache, something Veda-Core's
   deliberately cache-less design doesn't do by default. A small, static,
   compile-time-declared on-chip tier (grounded in GhostRider, ASPLOS 2015)
   closes that gap to **zero added latency** for register-pressure working
-  sets up to 17 objects — without reopening the cache-timing side channel
+  sets up to 17 objects -- without reopening the cache-timing side channel
   real CHERI's own official technical report admits it doesn't fully close
-  — see `veda-core/rtl/MILESTONE_24_RESULTS.md` and
+  -- see `veda-core/rtl/MILESTONE_24_RESULTS.md` and
   `veda-core/CRF_ARCHITECTURE_ALIGNMENT_VERDICT.md`.
 - Five real attack-demo classes, each run on both traditional RV64I and
   Veda-Core in real Icarus Verilog simulation, real register/trap values
@@ -133,7 +133,7 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
     (`mcause=0x18`, Bounds Violation).
   - **Out-of-bounds write**: an adjacent canary corrupted vs. untouched.
   - **Stack-smashing / return-address hijack**: control flow fully
-    attacker-hijacked vs. caught structurally by `OCJALR` — and ~30%
+    attacker-hijacked vs. caught structurally by `OCJALR` -- and ~30%
     *cheaper* than a naive software-checked equivalent (7 vs. 10 cycles).
   - **Use-after-free**: a stale reference silently returns a reused
     object's data (traditional "free" is a software-only convention,
@@ -142,19 +142,19 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
     capability's old generation no longer matches).
   - **Arbitrary-pointer forgery**: a hand-crafted bit pattern used as a
     pointer succeeds unconditionally on traditional hardware (the most
-    powerful exploitation primitive — arbitrary read/write) vs.
+    powerful exploitation primitive -- arbitrary read/write) vs.
     `CGetTag = 0` and a hard trap (an ordinary store can write the bits,
-    but never the out-of-band Tag — only real hardware mint operations
+    but never the out-of-band Tag -- only real hardware mint operations
     can).
 
   See `veda-core/ATTACK_DEMO_PORTFOLIO.md` for the exact register/trap
   values per demo and `veda-core/EVIDENCE_INDEX.md` for the verification
   ledger (which claims were re-run this session vs. file-committed vs.
-  externally cited) — note demos #4/#5 are session-scoped test programs,
+  externally cited) -- note demos #4/#5 are session-scoped test programs,
   not yet part of the permanent, committed regression corpus.
 
 ## Verification status
-(as of Milestone 25, 2026-08-09 — see `veda-core/rtl/MILESTONE_24_RESULTS.md` for Milestone 24's
+(as of Milestone 25, 2026-08-09 -- see `veda-core/rtl/MILESTONE_24_RESULTS.md` for Milestone 24's
 exact commands/outputs, and `veda-core/rtl/MILESTONE_25_RESULTS.md` for the full-GPR-context-save
 work that added the one new Sail test below)
 - Sail formal model: 59/59 self‑checking tests.
@@ -193,11 +193,11 @@ work that added the one new Sail test below)
   re-bound, not for bind-once reuse. Milestone 24 (TCM Fast-Path) has
   since built a real, mutation-tested on-chip tier that closes this gap
   to zero added latency for register-pressure working sets up to 17
-  objects — see `veda-core/rtl/MILESTONE_24_RESULTS.md`.
+  objects -- see `veda-core/rtl/MILESTONE_24_RESULTS.md`.
 - A real LLVM-based toolchain now exists (assembler, disassembler, a
   GDB stub with live capability-register visibility, and a SoftBound
   -style compiler pass that transparently retrofits ordinary C pointer
-  code into capability-checked accesses) — see "Toolchain: full setup,
+  code into capability-checked accesses) -- see "Toolchain: full setup,
   from a fresh clone to a debugged demo" below. It compiles a real,
   verified positive+negative demo, not synthetic examples; general
   C/C++ compatibility and library/ABI interop are explicitly **not**
@@ -210,7 +210,7 @@ work that added the one new Sail test below)
 Three real, public repos make up the full toolchain (following CHERI's
 own real approach: public forks of upstream LLVM and the Sail RISC-V
 model, tracking upstream, with Veda-Core's own extension layered on top
-as real, reviewable commits — not a from-scratch reinvention):
+as real, reviewable commits -- not a from-scratch reinvention):
 
 | Component | Repo | What it adds |
 |---|---|---|
@@ -227,7 +227,7 @@ cd Veda-Core
                                # compiles + runs the real end-to-end demo
 ```
 
-`./toolchain/setup.sh` is idempotent (safe to re-run — it checks each
+`./toolchain/setup.sh` is idempotent (safe to re-run -- it checks each
 component's real build output before redoing multi-minute work, never a
 separate bookkeeping file that could go stale) and supports `--dry-run`
 to preview, `--force` to rebuild, and individual named targets
@@ -238,11 +238,11 @@ to preview, `--force` to rebuild, and individual named targets
 
 ```bash
 # 1. System prerequisites (Ubuntu/Debian; verified on this exact
-#    combination — see veda-core/TOOLCHAIN_MILESTONE_2_RESULTS.md for the
+#    combination -- see veda-core/TOOLCHAIN_MILESTONE_2_RESULTS.md for the
 #    real, checked package versions)
 sudo apt-get install -y clang llvm-dev cmake ninja-build build-essential opam
 opam init -y && opam install -y sail
-# opam packages (sail) only land on PATH after this — opam does NOT
+# opam packages (sail) only land on PATH after this -- opam does NOT
 # update your shell automatically (it warns "the environment is not in
 # sync... run eval $(opam env)"). Without it, step 3's cmake fails with
 # "Sail not found" even though sail just installed successfully.
