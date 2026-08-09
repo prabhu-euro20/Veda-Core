@@ -154,9 +154,10 @@ https://github.com/user-attachments/assets/a454737e-e342-45c1-81d3-4bb3c8d80044
   not yet part of the permanent, committed regression corpus.
 
 ## Verification status
-(as of Milestone 24, 2026-08-08 — see `veda-core/rtl/MILESTONE_24_RESULTS.md` for the exact commands
-and outputs this was re-run with)
-- Sail formal model: 58/58 self‑checking tests.
+(as of Milestone 25, 2026-08-09 — see `veda-core/rtl/MILESTONE_24_RESULTS.md` for Milestone 24's
+exact commands/outputs, and `veda-core/rtl/MILESTONE_25_RESULTS.md` for the full-GPR-context-save
+work that added the one new Sail test below)
+- Sail formal model: 59/59 self‑checking tests.
 - RTL milestone smoke-test regression: 49/49 (46 pre-existing + 3 from Milestone 24), zero
   regressions; per-milestone results live in `veda-core/rtl/`.
 - RISC‑V ACT4 RV64I conformance: 51/51, zero regressions (run
@@ -241,6 +242,11 @@ to preview, `--force` to rebuild, and individual named targets
 #    real, checked package versions)
 sudo apt-get install -y clang llvm-dev cmake ninja-build build-essential opam
 opam init -y && opam install -y sail
+# opam packages (sail) only land on PATH after this — opam does NOT
+# update your shell automatically (it warns "the environment is not in
+# sync... run eval $(opam env)"). Without it, step 3's cmake fails with
+# "Sail not found" even though sail just installed successfully.
+eval $(opam env)
 
 # 2. The real, official riscv64-unknown-elf-{gcc,as,ld,gdb} toolchain --
 #    prebuilt, unmodified (`.insn` pseudo-ops already assemble every

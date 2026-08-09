@@ -7,12 +7,14 @@
 # this pass: "SUCCESS"/exit 0 on tohost=1, "FAILURE"/exit 1 on tohost=3)
 # rather than a custom watcher.
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$(dirname "$0")"
 
-TC=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin
+TC=$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin
 AS=$TC/riscv64-unknown-elf-as
 LD=$TC/riscv64-unknown-elf-ld
-SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
+SIM=$REPO_ROOT/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=./veda_test_sail.json
 LDS=./veda_selfcheck.ld
 

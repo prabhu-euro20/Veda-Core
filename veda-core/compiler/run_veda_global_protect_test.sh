@@ -21,15 +21,17 @@
 # -attributed function's own C15 prologue codegen, since the clang
 # driver's own -march=...xveda parser rejects xveda).
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$(dirname "$0")"
 
-LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
+LLVM=$REPO_ROOT/toolchain/llvm-project/build/bin
 CLANG=$LLVM/clang
 MC=$LLVM/llvm-mc
 LLVM_CONFIG=$LLVM/llvm-config
 LLC=$LLVM/llc
-LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
-SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
+LD=$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
+SIM=$REPO_ROOT/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=../sail_tests/veda_test_sail.json
 LDS=../runtime/veda_rt.ld
 PLUGIN=/tmp/VedaShadowPropagation.so

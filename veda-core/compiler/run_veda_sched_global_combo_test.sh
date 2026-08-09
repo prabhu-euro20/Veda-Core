@@ -5,13 +5,15 @@
 # one extra assembled object (veda_sched_global_combo_entry.S, the
 # globals-capability bootstrap) and the combo-specific demo/thread files.
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$(dirname "$0")"
 
-LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
+LLVM=$REPO_ROOT/toolchain/llvm-project/build/bin
 CLANG=$LLVM/clang
 MC=$LLVM/llvm-mc
-LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
-SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
+LD=$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
+SIM=$REPO_ROOT/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=../sail_tests/veda_test_sail.json
 LDS=../runtime/veda_rt.ld
 

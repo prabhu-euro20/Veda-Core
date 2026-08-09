@@ -7,14 +7,16 @@
 # of GNU `as`+`.insn` -- the first real software in this project to use
 # that toolchain for something beyond its own MC-layer unit tests.
 set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$(dirname "$0")"
 
-LLVM=/home/prabhu/makerchip/rva23-core/toolchain/llvm-project/build/bin
+LLVM=$REPO_ROOT/toolchain/llvm-project/build/bin
 MC=$LLVM/llvm-mc
 CLANG=$LLVM/clang
 LLC=$LLVM/llc
-LD=/home/prabhu/makerchip/rva23-core/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
-SIM=/home/prabhu/makerchip/rva23-core/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
+LD=$REPO_ROOT/toolchain/riscv-collab-gcc/riscv/bin/riscv64-unknown-elf-ld
+SIM=$REPO_ROOT/toolchain/sail-riscv/build/c_emulator/sail_riscv_sim
 CFG=../sail_tests/veda_test_sail.json
 LDS=veda_rt.ld
 INC=../sail_tests

@@ -57,31 +57,49 @@ FORCE=0
 JOBS=4
 
 log()  { printf '\033[1;34m[setup]\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31m[setup] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+# Aborts the whole script the moment any real (non-dry-run) command
+# fails -- confirmed necessary: an earlier version of this script let a
+# failed `cmake`/`make` (e.g. sail-riscv's own "Sail not found" case)
+# fall through silently into later steps and finally print "done.",
+# giving a false impression of success.
 run()  {
-  if [ "$DRY_RUN" -eq 1 ]; then
-    printf '\033[2m+ %s\033[0m\n' "$*"
-  else
-    printf '\033[2m+ %s\033[0m\n' "$*"
-    "$@"
-  fi
+  printf '\033[2m+ %s\033[0m\n' "$*"
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  "$@"
+  local status=$?
+  [ "$status" -eq 0 ] || die "command failed (exit $status): $*"
 }
 
-usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ---------------------------------------------------------------------------
 # deps -- Toolchain Milestone 2's own real, verified apt command, plus the
 # Sail compiler's own standard opam-based prerequisite.
 # ---------------------------------------------------------------------------
 step_deps() {
+  # opam packages (sail) only land on PATH after `eval $(opam env)` --
+  # opam itself warns about this ("the environment is not in sync...
+  # run eval $(opam env)") and does NOT update a non-interactive
+  # script's own PATH automatically, even if sail was opam-installed in
+  # a PRIOR script/session. Confirmed empirically on this project's own
+  # dev machine: `opam install -y sail` immediately followed by `cmake`
+  # (sail-riscv's own Sail-detection check) fails with "Sail not found"
+  # in the SAME shell/script run without this -- eval'd unconditionally
+  # here, before the presence check, so the check itself (and every
+  # later step in this script run) sees a correct PATH.
+  command -v opam >/dev/null 2>&1 && eval "$(opam env)" 2>/dev/null
   if [ "$FORCE" -eq 0 ] && command -v clang >/dev/null 2>&1 && command -v cmake >/dev/null 2>&1 \
-     && command -v ninja >/dev/null 2>&1 && command -v opam >/dev/null 2>&1; then
-    log "deps: clang/cmake/ninja/opam already present -- skipping (--force to redo)"
+     && command -v ninja >/dev/null 2>&1 && command -v opam >/dev/null 2>&1 \
+     && command -v sail >/dev/null 2>&1; then
+    log "deps: clang/cmake/ninja/opam/sail already present -- skipping (--force to redo)"
     return 0
   fi
   log "deps: installing system packages + Sail compiler"
   run sudo apt-get install -y clang llvm-dev cmake ninja-build build-essential opam
   run opam init -y
   run opam install -y sail
+  eval "$(opam env)"
 }
 
 # ---------------------------------------------------------------------------
@@ -118,10 +136,14 @@ step_sail_riscv() {
     log "sail-riscv: cloning $SAIL_RISCV_REPO (branch $BRANCH)"
     run git clone --branch "$BRANCH" "$SAIL_RISCV_REPO" "$dir"
   fi
+  # Defensive: covers `./toolchain/setup.sh sail-riscv` invoked standalone,
+  # in a shell/script run that never went through step_deps' own eval
+  # above -- see step_deps' comment for the full real reasoning.
+  command -v opam >/dev/null 2>&1 && eval "$(opam env)" 2>/dev/null
   log "sail-riscv: configuring + building (this can take several minutes)"
   run mkdir -p "$dir/build"
-  ( cd "$dir/build" && run cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DDOWNLOAD_GMP=FALSE -DENABLE_RISCV_TESTS=TRUE .. )
-  ( cd "$dir/build" && run make -j"$JOBS" )
+  ( cd "$dir/build" && run cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DDOWNLOAD_GMP=FALSE -DENABLE_RISCV_TESTS=TRUE .. ) || exit 1
+  ( cd "$dir/build" && run make -j"$JOBS" ) || exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -142,8 +164,8 @@ step_llvm() {
   run mkdir -p "$dir/build"
   ( cd "$dir/build" && run cmake -DCMAKE_BUILD_TYPE=Release \
       -DLLVM_ENABLE_PROJECTS=clang -DLLVM_TARGETS_TO_BUILD=RISCV \
-      -DLLVM_PARALLEL_LINK_JOBS=1 -G Ninja ../llvm )
-  ( cd "$dir/build" && run ninja -j"$JOBS" )
+      -DLLVM_PARALLEL_LINK_JOBS=1 -G Ninja ../llvm ) || exit 1
+  ( cd "$dir/build" && run ninja -j"$JOBS" ) || exit 1
 }
 
 # ---------------------------------------------------------------------------
