@@ -1,19 +1,19 @@
-# Veda-Core — Next Steps: A Rigorous Roadmap
+# Veda-Core -- Next Steps: A Rigorous Roadmap
 
-**Date:** 2026-07-23
+**Date:** 2026-07-23 (original analysis). Parts 1, 2, and 4 rewritten 2026-08-09.
 
 **Status update, 2026-07-25**: Tier 1 item 1 (`OCL.C`/`OCS.C`, §2.1) is
-now **done** in both Sail and RTL — see `MILESTONE_7_RESULTS.md`. Tier 1
+now **done** in both Sail and RTL -- see `MILESTONE_7_RESULTS.md`. Tier 1
 item 2 (Sail-side Veda-Atomic/`NMC_ADD.W` test-coverage parity, §2.2) is
-also now **done** — see `MILESTONE_V-B_RESULTS.md`'s 2026-07-25 addendum,
+also now **done** -- see `MILESTONE_V-B_RESULTS.md`'s 2026-07-25 addendum,
 16/16 self-check tests passing. Tier 1 item 3 (RTL `Rebind`/`Bind-NoTrap`,
-§2.3) is also now **done** — see `rtl/MILESTONE_8_RESULTS.md`; along the
+§2.3) is also now **done** -- see `rtl/MILESTONE_8_RESULTS.md`; along the
 way it closed a real, previously-undetected gap (the bind-mode field was
 decoded since RTL Milestone 1 but never actually checked, so every
 non-zero mode silently executed as plain `Bind`), and proved `Rebind`'s
 own real-relocation property against a real physical address, not just
 capability metadata. **Tier 1 is now fully closed.** Tier 2 item 4 (real
-RTL trap infrastructure, §2.4) is also now **done** — see
+RTL trap infrastructure, §2.4) is also now **done** -- see
 `rtl/MILESTONE_9_RESULTS.md`: a real Zicsr-lite CSR file
 (`mtvec`/`mepc`/`mcause`/`mtval`), real `CSRRW`/`CSRRS`/`MRET` (standard
 RISC-V encoding), and a real PC redirect wired to every Sail
@@ -25,45 +25,45 @@ broken by the new trap infrastructure exposing their own latent
 soft-fail assumptions, a register-naming collision, and a too-tight
 cycle budget). Deliberately still deferred within this same item: plain
 `Bind`'s own ODT-miss hard-trap, and `ODT-Populate`/`ODT-Destroy`'s own
-`Illegal_Instruction` privilege trap (a distinct exception class) — both
+`Illegal_Instruction` privilege trap (a distinct exception class) -- both
 real, named, separate follow-ons, not silently folded in. **Tier 2 is
 now fully closed.** Tier 3 item 5 (`CInvoke`-equivalent, §2.6) is also
-now **done** — see `rtl/MILESTONE_10_RESULTS.md`: `OCInvoke`, term-for-
+now **done** -- see `rtl/MILESTONE_10_RESULTS.md`: `OCInvoke`, term-for-
 term adapted from real CHERI's `CInvoke` (CHERI ISA spec p.209), in both
 Sail and RTL. `c15` (the last CRF entry) serves as the fixed "IDC"
 target, proportional to CHERI's own real `C31` convention (itself just
 the last entry in CHERI's 32-register file, not a separate physical
-register — a real fact this milestone's own research corrected from an
+register -- a real fact this milestone's own research corrected from an
 earlier, vaguer assumption). Deliberately still deferred within this
 same item, stated plainly: a real `PCC` register and real
 instruction-fetch-time capability enforcement (`OCInvoke` redirects PC
 directly to the resolved target address instead, achieving the real
-"atomic unseal-and-jump" property without that storage) — this would
+"atomic unseal-and-jump" property without that storage) -- this would
 require changes to the RVA23 base core's own fetch stage, out of bounds
 for `veda_core.tlv`-only work, and remains a distinct, separately-scoped
 future item. Tier 3 item 6 (capability-authority-gated
-`ODT-Populate`/`ODT-Destroy`, §2.5) is also now **done** — see
+`ODT-Populate`/`ODT-Destroy`, §2.5) is also now **done** -- see
 `rtl/MILESTONE_11_RESULTS.md`: `OSpecialRW` + the ODA (Object Descriptor
 Authority), Veda-Core's own single Special Capability Register,
 term-for-term adapted from real CHERI's own `CSpecialRW`/SCR model
 (CHERI ISA spec §4.3.6). `ODT-Populate`/`ODT-Destroy` now legal via a
-real OR — ordinary privilege (unchanged since Milestone 4) **or** a
+real OR -- ordinary privilege (unchanged since Milestone 4) **or** a
 live, unsealed, `Permit_Access_System_Registers`-carrying capability
-delegated into the ODA — matching CHERI's own layered privilege model
+delegated into the ODA -- matching CHERI's own layered privilege model
 exactly, activating `Permit_Access_System_Registers` for the first time.
 Found and honestly worked around a real Sail-side scope limit along the
 way: this project's own Sail test config has S/U-mode disabled, so
 privilege can never actually drop below Machine there, making a
 genuinely privilege-independent proof structurally impossible in Sail
-with the existing config — RTL's own independent `veda.droppriv`
+with the existing config -- RTL's own independent `veda.droppriv`
 supplied the one real, end-to-end proof instead. Zero design/Sail/RTL
 bugs found this milestone, a first since Milestone 8. The owner-hart
-hardware enforcement piece of Tier 3 item 7 is now **done** — see
+hardware enforcement piece of Tier 3 item 7 is now **done** -- see
 `rtl/MILESTONE_12_RESULTS.md`: a real `owner_hart` byte in every ODT
 entry, checked and claimed at Bind/Rebind time in both Sail and RTL,
 closing `VEDA_CORE_SPEC.md` §4.1's own long-named gap. **The remaining
-half of Tier 3 item 7 — real multi-hart RTL architecture and shared-ODT
-arbitration between genuinely concurrent harts — stays open**; it was
+half of Tier 3 item 7 -- real multi-hart RTL architecture and shared-ODT
+arbitration between genuinely concurrent harts -- stays open**; it was
 always the larger, separate undertaking, and owner-hart enforcement was
 verified via direct ODT-state injection standing in for a second hart
 (neither this project's single-process Sail simulator nor its
@@ -74,14 +74,14 @@ gap: plain `Bind`'s ODT-miss hard-trap (`cause = 0x05`) is now real in
 RTL too (Sail already had it). A full grep of the existing test corpus
 before writing any RTL found five pre-existing tests relying on plain
 `Bind`'s old soft-fail behavior against a never-populated/destroyed
-`Object_ID`; each was fixed by switching to `Bind-NoTrap` — the
-already-correct instruction for that purpose since Milestone 8 — not a
+`Object_ID`; each was fixed by switching to `Bind-NoTrap` -- the
+already-correct instruction for that purpose since Milestone 8 -- not a
 workaround. Also closed a real, previously-unnoticed Sail-side
 test-coverage gap (no self-check test had ever directly asserted this
 trap's own `mcause`/`mtval`, despite the Sail behavior itself existing
 for many milestones). Two more items were then resolved by research
 rather than code: **`ODT-Destroy`'s own owner-hart gating question is
-now permanently closed, not deferred** — `VEDA_CORE_SPEC.md` §4.1 was
+now permanently closed, not deferred** -- `VEDA_CORE_SPEC.md` §4.1 was
 updated with the real reasoning (CHERI ISA spec §2.3.16's own object-
 revocation precedent places that authority with a trusted handler,
 independent of current ownership; `ODT-Destroy` was correctly designed
@@ -90,20 +90,20 @@ item 5's own long-named "PCC" gap has been rescoped and fully designed**
 (`veda-core/PCC_COMPARTMENT_DESIGN.md`) but deliberately not yet
 implemented: research found real CHERI's own PCC is a universal,
 always-on fetch-time mechanism that doesn't fit Veda-Core's own hybrid,
-opt-in architecture at all — the actual, well-scoped gap is narrower,
+opt-in architecture at all -- the actual, well-scoped gap is narrower,
 `OCInvoke`'s own currently-incomplete compartmentalization bound (a
 successful `OCInvoke` redirects PC but nothing constrains subsequent
 execution to stay within the invoked capability's own bounds). The
 design doc verifies real, concrete Sail extension hooks for this
 (`ext_fetch_check_pc`/`ext_handle_fetch_check_error`, and new CSR
 addresses `0x7C0`-`0x7C3` in the real RISC-V-spec-reserved custom M-mode
-range) and a real, non-obvious finding along the way — `xret_callback`
+range) and a real, non-obvious finding along the way -- `xret_callback`
 is declared `pure`, so automatic hardware save/restore of compartment
 bounds across a trap isn't available the way it is for `mepc`; the
 design instead makes restoration an explicit software step, consistent
 with `mepc`'s own already-established explicit-advance-before-`mret`
 convention. **That design is now implemented and verified on the Sail
-side** (`veda-core/MILESTONE_14_RESULTS.md`) — `OCInvoke` genuinely
+side** (`veda-core/MILESTONE_14_RESULTS.md`) -- `OCInvoke` genuinely
 narrows execution to the invoked compartment's own bounds, fetch outside
 them genuinely hard-traps, and the full save/explicit-restore cycle
 across a real trap and `mret` is proven end to end, 24/24 Sail tests
@@ -130,17 +130,20 @@ undertaking) both genuinely not ripe for immediate work, this pass
 instead closed a real, previously-unchecked verification gap found while
 looking for what else was honestly left: the base RV64I ACT4 conformance
 suite (51/51) had only ever been run against the separate, untouched
-`rv64i_core.tlv`, never against `veda_core.tlv` itself — the file
+`rv64i_core.tlv`, never against `veda_core.tlv` itself -- the file
 fourteen real RTL milestones have actually modified, including
 Milestone 14's own new every-cycle check touching the central `$instr`
 signal directly. **`veda-core/rtl/ACT4_CONFORMANCE_RESULTS.md`: 51/51,
-0 failed, 0 timed out** — real, additional confidence that Veda-Core's
+0 failed, 0 timed out** -- real, additional confidence that Veda-Core's
 own additions have not regressed base RV64I correctness, checked against
 the actual file, not a proxy for it.
-This document otherwise remains a point-in-time analysis; the
-recommendation below should be re-read in that light, not assumed still
-current for every item — Tier 4 items remain exactly as originally
-assessed below.
+This document otherwise remains a point-in-time analysis. Parts 1, 2, and 4 below were fully
+rewritten on 2026-08-09 to reflect real project state as of that date (Sail through Milestone 22,
+RTL through Milestone 25, plus the entire Toolchain track and Minimal OS Kernel that didn't exist
+when the paragraph above was written) -- see each section's own evidence rather than assuming this
+2026-07-25 narrative alone is still current. Part 3's external-research citations (CHERI-RISC-V
+draft status, confidential-computing landscape) were not re-verified in that pass and are dated
+2026-07-23; treat them as aging and due for a re-check, not as settled facts.
 
 ## Why this document exists
 
@@ -152,146 +155,297 @@ is the output of that pass: (1) a complete re-read of every planning/
 results document this project has produced (2,000+ lines, all read in
 full, not grepped for fragments), cross-checked against the actual current
 RTL/Sail source rather than assumed from memory; (2) fresh external
-research, reading complete primary sources — the ratified RVA23 profile
+research, reading complete primary sources -- the ratified RVA23 profile
 spec, the current live CHERI-RISC-V draft spec, a real CHERI-RISC-V
-standardization-status talk, and a full peer-reviewed paper on Arm CCA —
+standardization-status talk, and a full peer-reviewed paper on Arm CCA --
 not search-result summaries alone. Findings that overturn or sharpen
 earlier assumptions are stated as such, not quietly folded in.
 
 ---
 
-## Part 1 — Where we actually are (verified against source, not memory)
+## Part 1 -- Where we actually are (verified against source, not memory)
 
-### Sail formal model — Milestones V-A/V-B/V-C, all done
-Capability struct (`Object_ID`(23)/`Base`(32)/`Length`(16)/`Offset`(16)/
-`Perms`(16)/`otype`(16)/`Reserved`(8), 128 bits + out-of-band Tag), 16-entry
-CRF, a flat system-wide ODT, **all three** Object-Bind modes (`Bind`/
-`Bind-NoTrap`/`Rebind`), `OCL.D`/`OCS.D`, `NMC_ADD.{W,D}`, Veda-Atomic (9
-ops, only `AMOXOR.D` independently tested), `OCA`, the 7-instruction query
-family, `CSetBounds`/`CSetBoundsExact`, `CSeal`/`CUnseal` with real
-hard-trap sealed-capability enforcement, `ODT-Populate`/`ODT-Destroy`
-(privilege-gated, not capability-authority-gated — a stated deviation). A
-real security gap (generation re-check never actually performed at
-dereference time) was found and fixed mid-pass. 14/14 self-checking tests
-via `sail_riscv_sim`'s real HTIF/`tohost` support.
+### Sail formal model -- Milestones 1 through 22, plus lettered V-A/V-B/V-C, A, B, C, and C-GPR-context-save, all done
 
-### RTL — Milestones 1 through 6, all done, this session
-Capability Register File, plain `Bind` only (no `Rebind`/`Bind-NoTrap`),
-`OCL.D`/`OCS.D`, `OCA`, `NMC_ADD.{W,D}`, all 9 Veda-Atomic ops (fully
-tested as of Milestone 5), the query family, `CSetBounds`/
-`CSetBoundsExact`, a minimal one-bit `$priv` privilege gate +
-`ODT-Populate`/`ODT-Destroy`, and `CSeal`/`CUnseal` with soft-fail (not
-hard-trap — this RTL has no trap infrastructure at all) sealed-capability
-enforcement. 12 real test programs, zero regressions, via real Icarus
-Verilog simulation. The RVA23 *base* core underneath it (`rv64i_core.tlv`)
-is bare RV64I, single-cycle, 51/51 real ACT4 conformance — **and nothing
-more**: no CSRs, no privilege modes, no MMU, no vector unit, no other
-standard extension.
+Everything the previous version of this section described is still there (the capability struct --
+`Object_ID`(23)/`Base`(32)/`Length`(16)/`Offset`(16)/`Perms`(16)/`otype`(16)/`Reserved`(8), 128 bits
+plus out-of-band Tag -- the 16-entry CRF, the flat system-wide ODT, all three Object-Bind modes,
+`OCL.{D,C}`/`OCS.{D,C}`, `NMC_ADD.{W,D}`, all 9 Veda-Atomic ops, `OCA`, the query family,
+`CSetBounds`/`CSetBoundsExact`, `CSeal`/`CUnseal`) -- but the numbered-milestone track has moved
+nine milestones further and added a real, second dimension: purecap enforcement, a compartment-jump
+primitive, and a minimal cooperative OS kernel, none of which existed when this section was last
+written.
 
-### Everything above is genuinely real — verified via actual compilation, actual simulation, actual trace output — not asserted from source review alone. That much is a solid foundation. What follows is what it's missing, some of it larger than the project's own docs have previously emphasized.
+`MILESTONE_19_RESULTS.md` added a real `veda_mode` CSR (`0x7C5`) and a genuine purecap enforcement
+hook (`ext_data_get_addr`/`ext_handle_data_check_error` in `core/addr_checks.sail`), with a new
+`VEDA_CAUSE_PURECAP_VIOLATION` cause code -- ordinary `LD`/`SD` can now be forced to hard-trap when
+purecap mode is active, not just Veda-Core's own capability-width instructions. `MILESTONE_20_RESULTS.md`
+then gated writes to the compartment-state CSR range (`0x7C0`-`0x7C3`, `0x7C5`) on live compartment
+state, closing a self-escape route a compartment could otherwise have used to write its own way out.
+`MILESTONE_21_RESULTS.md` made PCC reset universal on any trap (not just the traps that were already
+compartment-aware), via `handle_trap_extension`. `MILESTONE_22_RESULTS.md` (2026-08-01) is a
+directed audit against CHERI's own real, verified-from-source pillars (spatial safety,
+Veda-Core's own temporal-safety claim, compartmentalization) -- no gap found in the first two, and
+one real, new compartment-boundary scope finding in the third: `OCJALR` (`MILESTONE_17_RESULTS.md`'s
+own sentry-style unseal-and-jump, already built to close a separate, earlier stack-protection gap
+documented in `STACK_FRAME_CALL_RETURN_ANALYSIS.md`) does not itself reset PCC bounds, so it cannot
+cross a compartment boundary on its own -- confirmed with a real PoC under `sail_riscv_sim`, closed
+by documentation and a permanent test, not by changing `OCJALR`'s own deliberately narrow scope.
+
+On top of the numbered track, `MINIMAL_OS_KERNEL_DESIGN.md`'s three lettered milestones are also
+done in Sail: Milestone A (`rtl/MILESTONE_A_RESULTS.md`'s Sail counterpart) built the switcher
+pattern; Milestone B added a reserved-otype sentry mechanism; Milestone C
+(`MILESTONE_C_RESULTS.md`) built a real cooperative scheduler, `vc_scheduler_cooperative_yield.S`,
+that actually switches between two threads via trap-and-resume. A follow-on,
+`MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md`, then widened that scheduler's context save from 3
+dwords to the full x1-x31 GPR file across a yield. Separately, SSC (Stack-Spill Capability, its own
+design doc plus a Sail/RTL implementation) extended `OSpecialRW` with a third SCR selector and gave
+`OCInvoke` a save/swap side effect, so callee-saved spills inside a compartment route through a
+per-compartment capability rather than the caller's own stack -- verified for cross-thread isolation
+under the scheduler.
+
+Self-check test count has grown accordingly: `MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md` reports the
+full `sail_tests/run_veda_selfcheck_tests.sh` suite at **59/59 passed** (58 pre-existing plus the one
+modified test for that change), zero regressions elsewhere in the corpus -- up from the 14/14 this
+section originally cited for the V-A/V-B/V-C baseline alone.
+
+### RTL -- Milestones 1 through 25, plus lettered A, B, C, all done
+
+The RTL layer has closed most of the divergence from Sail that this section previously called out.
+It is no longer true that this RTL "has no CSRs, no privilege modes" -- `rtl/veda_core.tlv` now
+decodes a real, if intentionally narrow, Zicsr-lite CSR file at the standard RISC-V M-mode addresses
+(`mtvec` `0x305`, `mscratch` `0x340`, `mepc` `0x341`, `mcause` `0x342`, `mtval` `0x343`, plus
+Veda-Core's own `0x7C0`-`0x7C3`/`0x7C5` compartment-state range), real trap-taken PC redirect
+(`MILESTONE_9_RESULTS.md`), and a real purecap enforcement path with its own
+`VEDA_CAUSE_PURECAP_VIOLATION` cause and CSR-write gating mirroring Sail Milestones 19-21. `mscratch`
+is the newest addition (RTL Milestone 25, this file's own header comment previously scoped CSR
+recognition to exactly 4 addresses; it now names 5), added specifically to support the RTL mirror of
+the full-GPR-context-save scheduler.
+
+`rtl/MILESTONE_25_RESULTS.md` is the current latest numbered milestone: a byte-for-byte structural
+port of Sail's `mscratch`-based trap-and-resume scheduler into `rtl/sim/veda_smoke_m23_scheduler.S`
+and `veda_core.tlv`, widening the save/restore path from 3 dwords to the full 31-register GPR file.
+Verification: a standalone `mscratch` round-trip smoke test passed first try; the full scheduler port
+passed, including a mutation test (deliberately removing one save instruction, confirming the test
+fails cleanly, then reverting); the full RTL smoke-test regression, `rtl/run_veda_smoke_test.sh`,
+reports **49/49 passed**; the ACT4 RV64I conformance suite, `rtl/run_act4_tests.sh`, reports
+**51/51 passed** -- both zero regressions. One real bug was found and fixed during this milestone's
+own implementation (missing `gpr_ok` marker initialization in both thread-entry points, masking a
+correct bounds check behind an uninitialized-register false negative), caught by the same
+disciplined trace-and-bisect method this project has used since its earliest RTL milestones.
+
+Below the numbered track, RTL's own lettered milestones mirror Sail's: `rtl/MILESTONE_A_RESULTS.md`
+and `rtl/MILESTONE_B_RESULTS.md` (both dated 2026-08-05) port the switcher pattern and sentry
+mechanism; `rtl/MILESTONE_C_RESULTS.md` (2026-08-06) ports the cooperative scheduler itself. RTL
+Milestone 23 (`rtl/MILESTONE_23_RESULTS.md`) added real `ecall` decode and trap wiring -- a
+prerequisite the scheduler mirror needed -- verified at 40/40 smoke tests (38 pre-existing plus 2
+new) and 51/51 ACT4, with EBREAK, general illegal-instruction trapping, and misaligned-access
+detection explicitly still out of scope. RTL Milestone 24 (`rtl/MILESTONE_24_RESULTS.md`, 2026-08-08)
+is the other major addition since this section was last written: a real TCM/DRAM latency-tiering
+fast path, closing the linearly-scaling DRAM-latency cost a repeated-rebind access pattern was shown
+to incur (`DRAM_TCM_LATENCY_STUDY.md`, `CAPABILITY_REGISTER_PRESSURE_STUDY.md`). It adds a real
+DRAM-latency stall FSM, ODT tier routing (`$veda_odt_tcm_hit`), and a genuinely separate
+`tcm_scratch[]` array for capability-spill traffic, built and verified in five stages, each
+independently confirmed before layering the next; it ships with `DRAM_EXTRA_CYCLES` (`E`) defaulting
+to 0 to avoid breaking existing tests' cycle budgets, with the nonzero-`E` behavior of the stall FSM
+itself verified separately via mutation-tested temporary builds. The milestone's own "What this
+milestone does not show" section is explicit about real remaining limits: no physically-separate
+SRAM bank was built (TCM here is a latency classification plus a separate array, not a distinct
+memory technology); TCM-scratch access is currently `OCL.C`/`OCS.C`-only, with plain `OCL.D`/`OCS.D`,
+`NMC_ADD`, and Veda-Atomic against a TCM-backed object explicitly unsafe and unenforced by hardware;
+and Object_ID placement in the TCM-eligible range is a manual software convention, not yet enforced
+or automated by any compiler backend.
+
+Two things this section previously called absent remain genuinely absent, confirmed by direct source
+inspection rather than assumption. There is still no MMU or address translation of any kind --
+`veda_core.tlv` line 497's own comment states plainly that "no address translation" is needed in the
+datapath, and no page-table or virtual-memory logic exists anywhere in the file. And real multi-hart
+RTL is still not built: `rtl/MILESTONE_24_RESULTS.md` states outright that "Multi-hart TCM
+contention is out of scope by construction, not solved" -- this core is single-hart with `MHARTID=0`
+fixed, and the real, measured cross-hart TCM-contention covert channel from the literature
+(Wrisley et al., NordSec 2025, up to 68 kbps) is recorded as a forward-declared constraint for a
+future multi-hart core, not something this milestone addresses. The base RVA23 core underneath all
+of this (`rtl/rv64i_core.tlv`) remains bare RV64I, single-cycle, with the same 51/51 ACT4 conformance
+this section originally cited.
+
+### Toolchain -- 17 numbered milestones plus the Minimal OS Kernel's software layer, all done
+
+This subsection did not exist the last time Part 1 was written, because this track did not exist yet.
+It now spans `TOOLCHAIN_MILESTONE_1_RESULTS.md` through `TOOLCHAIN_MILESTONE_15_RESULTS.md` (15
+results-style documents; `16_EXTERN_GLOBALS_DECISION.md` and
+`17_UNATTRIBUTED_ACCESS_POLICY.md` are decision docs, not full results docs, confirmed by their own
+filenames and content), and it is real, working software, not a design exercise.
+
+An LLVM backend is built and self-hosting for this ISA: Toolchain Milestones 1-2 eliminated
+hand-written `.insn` hex encodings from the test corpus and stood up the LLVM dev environment;
+Milestones 5a and 5b/6 (`TOOLCHAIN_MILESTONE_5a_RESULTS.md`, `TOOLCHAIN_MILESTONE_5b_M6_RESULTS.md`)
+added a real LLVM assembler for the pure-GPR ODT instructions and then a full CRF register class
+covering all 33 CRF-touching instructions. A debugger exists: Milestone 3
+(`TOOLCHAIN_MILESTONE_3_RESULTS.md`) is a minimal GDB stub for the standard GPRs, and Milestone 4
+(`TOOLCHAIN_MILESTONE_4_RESULTS.md`) extends it with real capability-register visibility. A software
+runtime exists: Milestone 7 (`TOOLCHAIN_MILESTONE_7_RESULTS.md`) is `veda_rt`, a real
+malloc/free-equivalent C library (`veda_rt_init`, `veda_malloc`, `veda_free`, plus
+`veda_ocl_d`/`veda_ocs_d` wrappers), verified against 48 full malloc-write-read-free cycles across
+its object slots. A compiler-enforced memory-safety pass exists: Milestones 8-9
+(`TOOLCHAIN_MILESTONE_8_RESULTS.md`, `TOOLCHAIN_MILESTONE_9_RESULTS.md`) are a SoftBound-style LLVM
+IR pass, phase 1 (shadow Object_ID propagation) and phase 2 (dereference codegen), with a real
+end-to-end compiled-C demo. A compartmentalization attribute exists: Milestone 11
+(`TOOLCHAIN_MILESTONE_11_RESULTS.md`) adds a `veda_compartment` Clang attribute that reserves CRF
+`c15` and routes callee-saved-register spills through SSC automatically, with a follow-on nested-call
+test proving it composes when one compartment calls another. Hardware-checked stack-locals (Milestone
+12, `TOOLCHAIN_MILESTONE_12_RESULTS.md`) and hardware-checked globals/statics (Milestone 13, refined
+by Milestones 14-15 for CRF-pressure and compiler-pass-sizing reasons) extend the same SoftBound-style
+protection to C variables the original phase-1/phase-2 work didn't cover. And a C-callable
+cooperative scheduler API exists: Milestone 10 (`TOOLCHAIN_MILESTONE_10_RESULTS.md`) wraps the
+Sail/RTL-proven scheduler mechanism in `veda_sched.h`/`veda_sched_asm.S`/`veda_sched.c`, demonstrated
+with a real two-thread demo built and run through the actual toolchain pipeline, not a hand-assembled
+test.
+
+Taken together with the Minimal OS Kernel's Sail/RTL milestones above, this is a full vertical slice
+-- compiler, debugger, runtime, compiler-enforced safety pass, compartmentalization attribute, and a
+schedulable concurrency primitive -- none of which existed when this document's Part 4 originally
+told the project not to start "software/compiler/OS ecosystem" work as "a distant, named, unstarted
+cost." That recommendation has been overtaken by what was actually built and verified since; it is
+corrected here, not left standing alongside the evidence that contradicts it.
+
+### Everything above is genuinely real -- verified via actual compilation, actual simulation, actual trace output, and in the toolchain's case actual LLVM/GDB builds exercised through the real pipeline -- not asserted from source review alone. The Sail/RTL architectural gap this section used to describe (no CSRs, no privilege, no trap infrastructure in RTL) is now largely closed; what remains open is narrower and more structural: no MMU in either layer, and no genuine multi-hart RTL, both confirmed absent by direct source inspection above, not inferred from silence.
 
 ---
 
-## Part 2 — Real, already-flagged gaps, re-audited and re-prioritized
+## Part 2 -- Real, already-flagged gaps, re-audited and re-prioritized
 
-Cross-checked against `MILESTONE_PLAN.md`, all six `rtl/MILESTONE_*_RESULTS.md`,
-`MILESTONE_V-{A,B,C}_RESULTS.md`, and `FORMAL_VERIFICATION_PLAN.md` — every
-"not yet built"/"deferred"/"explicitly not decided" line in all ten
-documents, consolidated and re-ranked by actual leverage, not just by
-which document happened to mention it last.
+Cross-checked against `MILESTONE_PLAN.md`, every `rtl/MILESTONE_*_RESULTS.md` (1 through 25, plus
+lettered A/B/C), `MILESTONE_V-{A,B,C}_RESULTS.md`, `MILESTONE_B_RESULTS.md`/`MILESTONE_C_RESULTS.md`/
+`MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md`, the full `TOOLCHAIN_MILESTONE_1` through `_17` track, and
+`FORMAL_VERIFICATION_PLAN.md` -- every item from the original nine re-verified directly against the
+real files on disk as of 2026-08-09, not restated from memory of the last pass.
 
-### 2.1 — Highest leverage, smallest cost: capability-width memory access (`OCL.C`/`OCS.C`)
+### 2.1 -- CLOSED: capability-width memory access (`OCL.C`/`OCS.C`)
 
-**Not built in either Sail or RTL.** `VEDA_CORE_SPEC.md`'s own OCL/OCS
-width table already names a Capability width; `FORMAL_VERIFICATION_PLAN.md`
-§2.2 already identified the real Sail hook for it (`mem_meta`, deliberately
-left as `unit` "specifically for an extension to override with real
-per-location metadata"). Neither was ever exercised. **Concretely, this
-means Veda-Core capabilities cannot currently be stored to memory and
-loaded back with their Tag intact.** That is not a peripheral gap — it is
-the mechanism that makes a capability system a *system* rather than a
-register-only toy: linked data structures of capabilities, a capability
-heap, passing a sealed token between two pieces of code via memory (the
-exact CSeal/CUnseal use case Milestone 6 just built and verified in
-registers) all require it. This is real, tractable, and already has a
-designed landing spot in both layers — the highest-leverage-per-effort
-item found in this whole pass.
+Done, both Sail and RTL -- see `rtl/MILESTONE_7_RESULTS.md`. See the 2026-07-25 status update above
+for the full story.
 
-### 2.2 — Sail-side test-coverage parity gap (mirrors what RTL Milestone 5 just closed on the other side)
+### 2.2 -- CLOSED: Sail-side test-coverage parity gap
 
-`MILESTONE_V-B_RESULTS.md`'s own "Not yet built" section: 8 of 9
-Veda-Atomic ops beyond `AMOXOR.D`, and every non-D width across every
-instruction family, were never independently tested **in Sail** — the
-identical class of gap RTL Milestone 5 found and closed for the RTL side.
-Mechanical, cheap, closes an honesty gap the same way M5 did.
+Done -- see `MILESTONE_V-B_RESULTS.md`'s 2026-07-25 addendum, 16/16 self-check tests passing. See
+the 2026-07-25 status update above for the full story.
 
-### 2.3 — RTL/Sail parity: `Rebind`/`Bind-NoTrap`
+### 2.3 -- CLOSED: RTL/Sail parity, `Rebind`/`Bind-NoTrap`
 
-Sail has all three Object-Bind modes; RTL only decodes plain `Bind`
-(`MILESTONE_PLAN.md`'s own stated scope reduction, never revisited).
-`Rebind` in particular is the mechanism that makes Veda-Core's headline
-design claim ("the MSA can silently relocate an object without the CPU
-knowing") actually real — currently only provable in Sail, not RTL.
+Done -- see `rtl/MILESTONE_8_RESULTS.md`. See the 2026-07-25 status update above for the full story.
 
-### 2.4 — Real trap infrastructure in RTL
+### 2.4 -- CLOSED: real trap infrastructure in RTL
 
-Every RTL milestone has stated the same honest floor: violations suppress
-writes; they do not trap, because this RTL has no privileged/trap
-architecture at all. This is the single largest remaining *architectural*
-divergence between the two verified layers — Sail's own security model
-(hard trap, exact `mcause`/`mtval`) is not actually what the RTL currently
-enforces. Building it requires real CSR state (`mcause`/`mtval`/`mtvec`/
-`mepc`) and trap-taken control-flow redirect — a genuine, non-trivial RTL
-milestone, but a well-understood one (this is exactly `Zicsr` + the
-privileged-trap mechanism, both real, standard, already-specified RISC-V
-concepts, not novel design).
+Done -- see `rtl/MILESTONE_9_RESULTS.md` (Zicsr-lite CSR file, real `CSRRW`/`CSRRS`/`MRET`, a real
+PC redirect wired to every Sail "use"-family violation). See the 2026-07-25 status update above for
+the full story.
 
-### 2.5 — Capability-authority-gated `ODT-Populate`/`ODT-Destroy`
+### 2.5 -- CLOSED: capability-authority-gated `ODT-Populate`/`ODT-Destroy`
 
-Both Sail and RTL currently gate this on ordinary RISC-V privilege level, a
-stated, deliberate simplification (no spare R-type operand, no
-privileged-capability convention exists yet). Closing this "for real" needs
-a privileged-capability model (a `PCC`-adjacent concept) designed first —
-not a quick fix, correctly deferred.
+Done -- see `rtl/MILESTONE_11_RESULTS.md` (`OSpecialRW` + the ODA, term-for-term adapted from real
+CHERI's `CSpecialRW`/SCR model). See the 2026-07-25 status update above for the full story.
 
-### 2.6 — `CInvoke`-equivalent domain transition
+### 2.6 -- CLOSED: `CInvoke`-equivalent domain transition
 
-Explicitly, repeatedly named and deferred since the spec's own Section 6
-item 7: no `PCC`-equivalent register exists for it to unseal into. This is
-real, substantial, novel design work — CHERI's own most complex mechanism,
-the one that turns sealed capabilities into actual secure cross-domain
-calls rather than just opaque tokens.
+Done -- see `rtl/MILESTONE_10_RESULTS.md` (`OCInvoke`, both Sail and RTL). The narrower "PCC" follow
+-on this item's own deferral named is also now closed in both layers, see `MILESTONE_14_RESULTS.md`
+and `rtl/MILESTONE_14_RESULTS.md`. See the 2026-07-25 status update above for the full story.
 
-### 2.7 — Multi-core
+### 2.7 -- Still open: multi-hart RTL / concurrent-hart shared-ODT arbitration
 
-`VEDA_CORE_SPEC.md`'s Object-Bind exclusive-ownership policy is
-*designed and documented* (grounded in UPMEM's real share-nothing
-precedent, `SCALING_BARRIERS_RESEARCH.md` §4) but never actually built or
-tested against real multi-core RTL — this project has been single-hart
-throughout. A real, if distant, gap between "the policy is right" and "the
-policy is implemented and tested."
+Re-verified directly against the newest relevant milestone, `rtl/MILESTONE_24_RESULTS.md` (2026-08,
+the TCM-latency-tier work), which states this in its own words, unprompted, in a "What this milestone
+does not show" section: *"Multi-hart TCM contention is out of scope by construction, not solved. This
+core is single-hart (`MHARTID=0` fixed); the real, measured cross-hart TCM-contention covert channel
+(Wrisley et al., NordSec 2025, up to 68 kbps) is a forward-declared constraint for any future
+multi-hart Veda-Core, requiring per-hart-private banks or a real static time-partitioned arbiter
+(Wang/Ferraiuolo/Suh, HPCA 2014) before this security property could be trusted again in that
+setting."* Fourteen more RTL milestones (11 through 24) have shipped since this gap was first named,
+including a real `owner_hart` byte and owner-hart enforcement (`rtl/MILESTONE_12_RESULTS.md`) --
+but every one of them, including Milestone 12's own owner-hart proof, was verified via direct
+ODT-state injection standing in for a second hart, not genuine concurrent execution, because neither
+this project's single-process Sail simulator nor its single-core RTL can produce one. `MHARTID` is
+still a fixed RTL `localparam`, not a real per-instance parameter. This remains the single largest
+undertaking on this list, unchanged in scope since the original assessment, now with one additional
+concrete, cited security consequence (the TCM covert-channel bound) attached to it.
 
-### 2.8 — `Length`/`Offset` 16-bit cap
+### 2.8 -- Still open: `Length`/`Offset` 16-bit cap
 
-A stated, honest, load-bearing limit (65,536-byte object-size cap) —
-growing past it needs either a wider capability register or CHERI-
-Concentrate-style compressed bounds encoding (real, proven, but a separate
-design task, not free).
+Re-verified directly against `VEDA_CORE_SPEC.md`'s own capability-field table: `Length` and `Offset`
+are still both 16 bits, the field-table note is unchanged, still stating the same honest trade-off --
+"16 bits caps a single object's size at 65,536... growing past this later would need either a wider
+capability register... or a CHERI-style compressed encoding." No compressed-bounds design or
+implementation work exists anywhere in the milestone corpus checked for this pass (Sail Milestones
+15-22, RTL Milestones 15-25, the full toolchain track). Still a stated, honest, load-bearing limit,
+not free to lift.
 
-### 2.9 — Formal-verification maturity gap
+### 2.9 -- Still open, but narrower than before: formal-verification maturity gap
 
-`SCALING_BARRIERS_RESEARCH.md` §8's own real, cited finding: the mature
-`sail-cheri-riscv` effort is 51.3% Isabelle, 45.9% Rocq/Coq, only 2.6%
-executable Sail. Everything built so far (V-A/B/C) is entirely in that
-2.6% category. This is not a small remaining gap — it is, by this
-project's own honest calibration, the overwhelming majority of what "formal
-verification" means at real maturity, essentially entirely unstarted.
+Re-verified against `SAIL_COQ_EXPORT_RESULTS.md` (commit `6b85cf4`, 2026-07-27), read in full rather
+than assumed closed by its existence. The real work done: Sail's own official Coq/Rocq export
+backend was run against the full RVA23 profile Sail model including Veda-Core's extension, producing
+two real Coq source files (`rv64d_types.v`, 16,825 lines; `rv64d.v`, 101,936 lines), with concrete,
+line-level evidence that Veda-Core's own fixes (the Milestone 15/16 ODT-aliasing and generation
+-retirement logic) translate faithfully -- not just "the build didn't error." The document's own
+"Honest, real scope limits" section states plainly why this does not close the gap: `coqc`, the real
+Coq compiler needed to type-check the `.v` files and machine-check any proof, is not installed; no
+actual proof obligations or lemmas were written or checked; the safety property this architecture's
+own claims rest on ("a capability with `Tag=false` can never result in a successful write") remains
+unproven. The document's own conclusion is the accurate one to carry forward: "the model is proven to
+translate correctly into a real theorem-prover's own input language; no actual theorem has been
+stated or checked yet" -- a real, meaningfully smaller gap than the original `SCALING_BARRIERS_
+RESEARCH.md` §8 finding (51.3% Isabelle / 45.9% Rocq/Coq / 2.6% executable Sail for the mature
+`sail-cheri-riscv` effort), but still a real and substantial one. No `coqc` install, no lemma, no
+theorem exists in this project as of 2026-08-09.
+
+### 2.10 -- Re-examined, found already closed: protected-stack / return-address calling convention
+
+`ROP_JOP_MITIGATION_FIT_ANALYSIS.md` originally identified exactly the gap this item was expected to
+be: Veda-Core had no `csp`-equivalent convention, so a corrupted return address on the ordinary RISC-V
+stack would be read and used by a plain `JALR`, completely outside the capability system's field of
+view. That document's own later "Update" section, and the fuller `STACK_FRAME_CALL_RETURN_ANALYSIS.md`
+it points to, show this was subsequently closed, not left open. A "Frame-object per call" design was
+considered and rejected on three independent, quantified grounds (the Intel iAPX 432 precedent's
+real 300us/`CALL` cost, this project's own measured per-call-vs-amortized instruction-count math, and
+RTL Milestone 16's 255-reuse ODT-generation-retirement ceiling). In its place, a real, working
+`csp`-equivalent convention was built entirely from already-existing instructions (`OCA`+`CSeal` at
+the call site, `OCL.C`+`CGetTag`+`CUnseal`+`CGetAddr` on return) and tested against three real
+programs on the actual, unmodified, committed `veda_core.tlv`: the traditional convention was
+confirmed cleanly hijackable (`x30=0xbad1`) in 10 cycles, the protected convention caught the
+identical corruption (`x30=0xca11`) via a real `CGetTag` check, and a third variant with that check
+deliberately omitted (`prot_gap`) proved the protection was, at that point, a software discipline
+(the check could be silently forgotten), not a hardware guarantee. That specific residual gap was
+then closed structurally, not by discipline, by `rtl/MILESTONE_17_RESULTS.md`: `OCJALR`, a lighter,
+hard-trapping sibling of `OCInvoke` adapted from real CHERI's `CJALR` (CHERI ISA spec p.213), merges
+unseal-verification and jump into one atomic instruction, re-running `prot_gap`'s own exact corruption
+scenario with the vulnerable tail replaced by a single `ocjalr` and landing in a real, controlled
+hard-trap instead of an undefined jump -- 28/28 Sail self-check tests, 31 real RTL smoke tests (zero
+regressions), 51/51 ACT4, zero regressions in either layer. A real, narrower scope boundary was found
+afterward by Milestone 22's own CHERI-pillar audit (`OCJALR` does not reset PCC bounds, so it cannot
+itself cross a live compartment boundary -- a documented, tested design boundary, not an escape: a
+compartment exit must use a second `OCInvoke`), and the measured per-call cost of the protected
+convention itself (`STACK_FRAME_CALL_RETURN_ANALYSIS.md`: `+6 cycles/call` sustained versus the
+traditional convention, not amortized) is real and worth carrying forward as a stated cost, not a
+gap. Net: this is not an open item to add to this list. If anything remains here, it is adoption --
+this convention exists as a proven, tested pattern, not yet a mandatory ABI enforced project-wide --
+a policy/toolchain question closer to `TOOLCHAIN_MILESTONE_17_UNATTRIBUTED_ACCESS_POLICY.md`'s own
+open diagnostic-tooling gap than a new architectural hole.
+
+No other genuinely new, concrete, still-open gap was found while checking the most recent milestone
+and domain-fit documents (`rtl/MILESTONE_24_RESULTS.md`, `rtl/MILESTONE_25_RESULTS.md`,
+`MILESTONE_C_GPR_CONTEXT_SAVE_RESULTS.md`, `TOOLCHAIN_MILESTONE_15_RESULTS.md` through `_17`) beyond
+what 2.7-2.9 already cover. The one minor, real item surfaced in passing --
+`TOOLCHAIN_MILESTONE_17_UNATTRIBUTED_ACCESS_POLICY.md`'s own named future work, a compile-time
+diagnostic for an unattributed function reaching a global from inside a compartment (today a runtime
+hard-trap, not a build-time error) -- is a usability improvement on an already-safe behavior, not a
+correctness or security gap, and is left where that document already places it rather than
+force-numbered here.
 
 ---
 
-## Part 3 — Fresh external research: reframing "how far can we extend, and toward what"
+## Part 3 -- Fresh external research: reframing "how far can we extend, and toward what"
 
-### 3.1 — RVA23 is ratified, and its real requirement list is enormous
+### 3.1 -- RVA23 is ratified, and its real requirement list is enormous
 
 Read in full from the official ratified spec
 ([docs.riscv.org/reference/rva23](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html)):
@@ -312,21 +466,21 @@ do we still need to be RISC-V compatible")**: the current core (bare
 RV64I, zero privilege architecture, zero MMU, zero vector unit) implements
 roughly 1 of ~40 required pieces of `RVA23U64` alone, and zero of
 `RVA23S64`'s additional privileged/MMU/hypervisor requirements. This is not
-a "few milestones away" gap — it is a categorically different scale of
+a "few milestones away" gap -- it is a categorically different scale of
 undertaking than anything built so far, and every one of those ~40 pieces
 is **already fully specified, already implemented by multiple real
 vendors** (SiFive, Ventana, and others already ship real RVA23-class
 silicon). There is close to zero novel research value in re-implementing
-them — the entire value would be in the exercise of implementing them, not
+them -- the entire value would be in the exercise of implementing them, not
 in any new idea they'd embody.
 
-### 3.2 — CHERI-RISC-V itself — Veda-Core's real, closest precedent — is still in draft, a year past its own target
+### 3.2 -- CHERI-RISC-V itself -- Veda-Core's real, closest precedent -- is still in draft, a year past its own target
 
 Two real, current primary sources, read in full:
 
 - The **live spec repository** ([riscv.github.io/riscv-cheri](https://riscv.github.io/riscv-cheri/)),
   fetched today: version **v0.9.9-draft**, dated **2026-07-21** (two days
-  before this document), status **"Stable"** — RISC-V's own maturity model
+  before this document), status **"Stable"** -- RISC-V's own maturity model
   defines "Stable" as "assume anything could still change, but limited
   change should be expected," one stage before "Frozen" and two before
   "Ratified."
@@ -343,7 +497,7 @@ Two real, current primary sources, read in full:
   risking a defacto standard forming."*
 
 **Cross-referencing these two sources directly**: the "late summer 2025"
-target has now been missed by well over ten months — the spec is still
+target has now been missed by well over ten months -- the spec is still
 "Stable"-draft, not ratified, as of this week. **This is the single most
 important calibration point this research pass produced**: a RISC-V
 Task-Group-chartered effort, backed by Google, Microsoft Research,
@@ -352,21 +506,21 @@ and real committed hardware, has still taken *at minimum* 21 months
 (October 2024 → now) without reaching ratification. Veda-Core is a
 single-contributor research project pursuing a *more* novel design (fully
 address-less and object-table-based, versus CHERI's address-based
-tagged-pointer model — `SCALING_BARRIERS_RESEARCH.md` §7 already made this
+tagged-pointer model -- `SCALING_BARRIERS_RESEARCH.md` §7 already made this
 exact comparison for the software-ecosystem question; it applies equally
 here to the standardization-timeline question). This isn't a reason to
-stop — it's a real, evidence-based reason not to frame any near-term work
+stop -- it's a real, evidence-based reason not to frame any near-term work
 here as "on the path to being a standardized, shippable extension soon."
 The honest framing is: this is research-stage work in a space where even
 the best-resourced comparable effort is still years from that bar.
 
-### 3.3 — Confidential computing (Arm CCA / Intel TDX / AMD SEV-SNP) is a different problem, not a competitor
+### 3.3 -- Confidential computing (Arm CCA / Intel TDX / AMD SEV-SNP) is a different problem, not a competitor
 
 Read in full: Bertschi & Shinde (ETH Zürich), *"OpenCCA: An Open Framework
 to Enable Arm CCA Research"* (2025, full paper via `arXiv:2506.05129`), plus
 a real, current technical comparison search across TDX/SEV-SNP/CCA
 sources. **Real, precise technical finding, not assumed**: Arm CCA's
-actual mechanism is the Realm Management Extension (RME) — Granule
+actual mechanism is the Realm Management Extension (RME) -- Granule
 Protection Checks/Tables at each core, splitting execution into four
 *worlds* (Normal, Secure, Realm, Root), with a firmware Realm Management
 Monitor managing whole *Confidential VMs*. Intel TDX and AMD SEV-SNP do the
@@ -378,7 +532,7 @@ CPU supports CCA yet."*
 
 **This is categorically not what CHERI or Veda-Core do.** CHERI/Veda-Core
 target *intra-process and inter-process* memory safety and fine-grained
-compartmentalization — protecting a program from its own bugs (buffer
+compartmentalization -- protecting a program from its own bugs (buffer
 overflows, use-after-free) and enabling sub-process sandboxing (Milestone
 6's `CSeal`/`CUnseal` sealed-token model is exactly this), a completely
 different granularity and threat model than "protect this whole VM from
@@ -390,70 +544,124 @@ tag vs. address-less+object-table), not the confidential-computing
 vendors, who are solving an adjacent, complementary problem at a different
 layer. A real system could plausibly use both together (a CCA/TDX-style
 confidential VM, internally memory-safe via a CHERI/Veda-Core-style
-capability model) — they are not substitutes.
+capability model) -- they are not substitutes.
 
 ---
 
-## Part 4 — Recommendation, reasoned, tiered
+## Part 4 -- Recommendation, reasoned, tiered
 
-**Tier 1 — near-term, high leverage, directly strengthens the existing, verified core. Recommended as the actual next milestone.**
-1. `OCL.C`/`OCS.C` (capability-width, Tag-preserving memory access) — §2.1.
-   The highest leverage-per-effort item found: unlocks capabilities-in-memory,
-   the property that makes this a real capability *system*, and both layers
-   already have a designed landing spot for it.
-2. Sail-side Veda-Atomic/width test-coverage parity — §2.2. Cheap, mirrors
-   RTL Milestone 5's already-proven approach exactly.
-3. RTL `Rebind`/`Bind-NoTrap` — §2.3. Cheap, closes a real Sail/RTL parity
-   gap, makes the project's own headline "transparent relocation" claim
-   provable in RTL, not just Sail.
+**Tier 1 -- near-term, high leverage, closes a real, cited gap with a bounded, well-understood scope. Recommended as the actual next milestone.**
+1. `Length`/`Offset` compressed-bounds encoding -- §2.8. Of everything still open, this is the
+   only item that is both small in design surface and already precisely specified: the honest
+   16-bit cap documented in `VEDA_CORE_SPEC.md`'s own field table (`0`-`65,535` per object) has
+   sat unchanged since the field was split from the old 32-bit `Limit`, and nothing in Sail
+   Milestones 15-22, RTL Milestones 15-25, or the toolchain track has touched it. It does not
+   require new hardware ports the way multi-hart does, and it does not require external tooling
+   the way the Coq gap does -- it is a self-contained encoding change (CHERI-style compressed
+   bounds, or a narrower fixed-point widening) against a field table this project already
+   understands precisely, with regression suites (59/59 Sail self-check, 49/49 RTL smoke, 51/51
+   ACT4) already in place to catch breakage immediately. Recommended as the actual next milestone
+   on leverage-per-effort grounds: it removes a stated, load-bearing limit without waiting on any
+   other open item.
 
-**Tier 2 — medium-term, substantial but well-understood, dual-purpose.**
-4. Real RTL trap infrastructure (`Zicsr`-lite + trap-taken control flow) —
-   §2.4. The largest remaining Sail/RTL architectural divergence, *and* a
-   genuine, if small, real step toward eventual standard-RISC-V alignment
-   (unlike the broad RVA23 list below, `Zicsr`/trap delivery is something
-   Veda-Core's own security model actually needs regardless of any
-   standards-compliance goal).
+**Tier 2 -- medium-term, substantial, dual-purpose, but each blocked on real external dependencies this project does not control alone.**
+2. Formal-verification maturity -- §2.9. `SAIL_COQ_EXPORT_RESULTS.md` (commit `6b85cf4`,
+   2026-07-27) already did the real, hard infrastructure step -- Sail's own official Coq/Rocq
+   export backend runs cleanly against the full RVA23 profile plus Veda-Core's extension,
+   producing `rv64d_types.v` (16,825 lines) and `rv64d.v` (101,936 lines), with concrete,
+   line-level evidence that Veda-Core's own Milestone 15/16 ODT-aliasing and generation-retirement
+   fixes translate faithfully. What remains is not a research question anymore, it is an
+   installation-and-labor question: `coqc` is not installed in this environment, and no lemma or
+   theorem has been written or checked, including the one this architecture's entire tagged-memory
+   claim rests on ("a capability with `Tag=false` can never result in a successful write"). This
+   is a smaller gap than it was when `SCALING_BARRIERS_RESEARCH.md` §8 measured the mature
+   `sail-cheri-riscv` effort's own proof corpus at 51.3% Isabelle / 45.9% Rocq/Coq / 2.6%
+   executable Sail, but "smaller" does not mean "near-term": it still needs dedicated
+   theorem-proving time this project has not yet spent, on top of a toolchain install this
+   project has not yet done. Sequenced behind Tier 1 because a compressed-bounds change would
+   itself need re-verification against whatever Coq obligations eventually get written, so
+   doing the encoding change first avoids re-deriving proof obligations twice.
+3. Real multi-hart RTL / concurrent-hart shared-ODT arbitration -- §2.7. Fourteen RTL milestones
+   (11 through 24) have shipped since this gap was first named, including a real `owner_hart`
+   byte and owner-hart enforcement (`rtl/MILESTONE_12_RESULTS.md`), and every one of them was
+   verified via direct ODT-state injection standing in for a second hart, not genuine concurrent
+   execution -- `MHARTID` is still a fixed RTL `localparam`, not a per-instance parameter, and
+   `rtl/MILESTONE_24_RESULTS.md` says outright, unprompted, that "Multi-hart TCM contention is out
+   of scope by construction, not solved." This is placed in Tier 2, not Tier 1, for the same
+   reason it was placed below the near-term items in the original assessment: it remains the
+   single largest undertaking on this list, requiring either a second real hart instance or a
+   credible multi-hart testbench harness before the exclusive-ownership policy this project
+   already designed can be exercised for real rather than simulated by injection. What is new
+   since the original assessment is a second, concrete, cited cost attached to leaving it open --
+   the measured cross-hart TCM covert channel (Wrisley et al., NordSec 2025, up to 68 kbps) that
+   `rtl/MILESTONE_24_RESULTS.md` names as a forward-declared constraint -- which raises this item's
+   priority within Tier 2 without changing its Tier.
 
-**Tier 3 — large, novel, deliberately sequenced after a design pass of their own.**
-5. `CInvoke`-equivalent + a `PCC`-adjacent control-flow-capability design —
-   §2.6. The genuinely novel, highest-differentiation feature remaining;
-   needs its own dedicated design pass first, not a quick add.
-6. Capability-authority-gated `ODT-Populate`/`ODT-Destroy` — §2.5. Blocked
-   on the same `PCC`-adjacent design work as item 5.
-7. Real multi-core RTL, finally exercising the already-designed
-   exclusive-ownership policy — §2.7.
+**Tier 3 -- real, but adoption/tooling work rather than new architecture; sequenced after Tier 1-2 close.**
+4. Protected-stack (`csp`-equivalent) calling convention as a mandatory, project-wide ABI --
+   re-examined against §2.10 and found already built and verified, not open. `ROP_JOP_MITIGATION_
+   FIT_ANALYSIS.md`'s own "Update" section, cross-checked against `STACK_FRAME_CALL_RETURN_
+   ANALYSIS.md` and `rtl/MILESTONE_17_RESULTS.md`, shows the mechanism exists end-to-end: a
+   `csp`-equivalent convention built from `OCA`+`CSeal` at the call site and
+   `OCL.C`+`CGetTag`+`CUnseal`+`CGetAddr` on return, tested against three real programs on the
+   actual, unmodified `veda_core.tlv` (the unprotected convention was cleanly hijacked in 10
+   cycles; the protected convention caught the identical corruption via a real `CGetTag` check;
+   a deliberately-broken `prot_gap` variant proved the check itself could be silently omitted),
+   with that residual gap then closed structurally by `OCJALR` (`rtl/MILESTONE_17_RESULTS.md`,
+   28/28 Sail, 31 RTL smoke tests with zero regressions, 51/51 ACT4). What is left is not a
+   design or verification task, it is adoption: this convention is a proven pattern available to
+   any compartment, not yet a default the toolchain enforces for every function the way
+   `TOOLCHAIN_MILESTONE_11_RESULTS.md`'s `veda_compartment` attribute enforces SSC-routed spills.
+   That is a toolchain-integration item closer in kind to
+   `TOOLCHAIN_MILESTONE_17_UNATTRIBUTED_ACCESS_POLICY.md`'s own named compile-time-diagnostic
+   future work than a new architectural gap, and is listed here only to state explicitly that it
+   is not being carried forward into Tier 1 or Tier 2 as an open item.
 
-**Tier 4 — explicitly not recommended as a near/medium-term priority, with reasoning stated plainly rather than left implicit:**
-- **Chasing broad RVA23 compliance** (§3.1) — confirmed, quantified this
-  pass: ~40 already-fully-specified, already-multiply-implemented standard
-  extensions, near-zero novel research value, multi-year scope. Pursuing
-  it now would consume all available effort on well-trodden ground while
-  contributing nothing to this project's actual differentiated value.
-  **Recommendation: do not adopt "become RVA23-compliant" as a goal.**
-  Take standard extensions only where they directly serve Veda-Core's own
-  needs (Tier 2's `Zicsr` is exactly this kind of targeted, justified
-  exception — not a step toward the broader list).
-- **Full Isabelle/Rocq-level formal proofs** (§2.9) — real, and eventually
-  necessary for anything claiming CHERI-grade assurance, but by this
-  project's own honest calibration represents the large majority of real
-  verification effort and needs dedicated theorem-proving expertise/time
-  disproportionate to pursue casually alongside RTL/ISA work. Flagged as a
-  real, distant aspiration, not a near-term milestone.
-- **Software/compiler/OS ecosystem** (`SCALING_BARRIERS_RESEARCH.md` §7) —
-  CHERI's own real, decade-plus, DARPA-and-UK-government-funded,
-  dozen-committer history is the honest floor here. Not a milestone to
-  start casually; the single largest real-world adoption barrier of
-  anything in this document, correctly left as a distant, named, unstarted
-  cost rather than quietly ignored.
+**Tier 4 -- explicitly not recommended as a near/medium-term priority, with reasoning stated plainly, including one correction to this document's own prior recommendation:**
+- **CORRECTION to this document's own prior Tier 4 entry on "software/compiler/OS ecosystem"** --
+  the original text called this "not a milestone to start casually... the single largest real
+  -world adoption barrier of anything in this document, correctly left as a distant, named,
+  unstarted cost." That claim is wrong as stated today and is corrected here, not quietly
+  edited. Since it was written, this project built and verified exactly that category: an LLVM
+  backend self-hosting for this ISA (Toolchain Milestones 1-2, 5a, 5b/6), a GDB debugger with
+  capability-register visibility (Milestones 3-4), a working C runtime library (`veda_rt`,
+  Milestone 7, 48 malloc-write-read-free cycles verified), a SoftBound-style compiler-enforced
+  memory-safety IR pass (Milestones 8-9, 12, 13-15), a `veda_compartment` Clang attribute with
+  automatic SSC-routed spilling (Milestone 11, plus a verified nested-call case), and a
+  C-callable cooperative scheduler API (Milestone 10) sitting on top of a real Sail/RTL minimal
+  OS kernel (Milestones A/B/C, 53/53 regression, RTL-mirrored). This is real, working software
+  exercised through the actual toolchain pipeline, not a design exercise -- "unstarted" is
+  false. What still genuinely holds from the original claim is narrower and should be stated
+  precisely rather than thrown out along with the false part: ecosystem *scale* comparable to
+  real CHERI's decade-plus, DARPA-and-UK-government-funded, dozen-committer install base and
+  package corpus remains a real, distant gap. This project has one backend, one debugger stub,
+  one runtime library, and no external contributors -- breadth and maturity of *use*, not
+  existence of the pieces, is the part of the original warning that is still true.
+- **Chasing broad RVA23 compliance** (§3.1) -- unchanged from the original assessment, re-checked
+  against §3.1's own count and against the milestone corpus for this pass: still roughly forty
+  already-fully-specified, already-multiply-implemented standard extensions with near-zero novel
+  research value for this project's actual differentiated work. Nothing in Sail Milestones 15-22,
+  RTL Milestones 15-25, or the toolchain track changes this calculus. **Recommendation unchanged:
+  do not adopt "become RVA23-compliant" as a goal**; take standard extensions only where they
+  directly serve Veda-Core's own needs, the same justification that made `Zicsr` (closed, RTL
+  Milestone 9) and `ecall` (closed, RTL Milestone 23) legitimate targeted exceptions rather than
+  steps toward the broader list.
+- **Full Isabelle/Rocq-level formal proofs** -- folded into Tier 2 item 2 above rather than
+  restated as a separate Tier 4 entry, since `SAIL_COQ_EXPORT_RESULTS.md` has moved this from "an
+  aspiration with no concrete first step" to "a scoped, partially-complete task with a named
+  installation blocker and named unwritten lemmas." It is real and it is not near-term, but it no
+  longer belongs in the same bucket as "not started" -- Tier 2 is the accurate placement now,
+  not Tier 4.
 
 ## What I decided, in one sentence, and why
 
-Build `OCL.C`/`OCS.C` next (Tier 1, item 1): it is the highest-leverage,
-already-designed-for, currently-missing piece that makes Veda-Core's
-capability model actually usable as a *system* rather than a register-only
-demonstration, in both Sail (closing real parity with the mature CHERI
-formal-model precedent) and RTL — and, per Part 3's own research, doing
-that is a better use of effort right now than either chasing standard
-RISC-V breadth (§3.1, low differentiation) or full theorem-proving rigor
-(§2.9, disproportionate at this stage).
+Build the `Length`/`Offset` compressed-bounds encoding next (Tier 1, item 1): it is the only
+still-open item that is both fully scoped by this project's own existing spec table and free of
+external dependencies -- unlike multi-hart RTL, which needs a second real hart instance or
+credible concurrency harness this project does not yet have, and unlike the formal-verification
+gap, which needs a `coqc` install and theorem-proving labor this project has not yet committed to
+-- and closing it removes a stated, honest, load-bearing limit (`VEDA_CORE_SPEC.md`'s own 65,536
+-byte per-object cap) using the same regression discipline (Sail self-check, RTL smoke, ACT4) that
+has caught every real bug in this project's 25 RTL and 22 Sail numbered milestones so far, rather
+than opening a new, larger front before either of the two genuinely harder Tier 2 items is even
+staffed.
