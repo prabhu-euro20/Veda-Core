@@ -221,8 +221,8 @@ as real, reviewable commits — not a from-scratch reinvention):
 ### One-command setup
 
 ```bash
-git clone git@github.com:prabhu-euro20/Veda-Core.git rva23-core
-cd rva23-core
+git clone git@github.com:prabhu-euro20/Veda-Core.git
+cd Veda-Core
 ./toolchain/setup.sh          # clones the two forks above, builds everything,
                                # compiles + runs the real end-to-end demo
 ```
@@ -232,7 +232,7 @@ component's real build output before redoing multi-minute work, never a
 separate bookkeeping file that could go stale) and supports `--dry-run`
 to preview, `--force` to rebuild, and individual named targets
 (`./toolchain/setup.sh --help` lists them: `deps`, `gnu-toolchain`,
-`sail-riscv`, `llvm`, `demo`, `debug`).
+`sail-compiler`, `sail-riscv`, `llvm`, `demo`, `debug`).
 
 ### What each step does, if you want to run them by hand
 

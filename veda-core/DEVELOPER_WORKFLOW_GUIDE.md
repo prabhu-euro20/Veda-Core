@@ -74,6 +74,12 @@ advanced compiler-plugin build pipeline. See Section 7 below before reaching for
 
 ## 2. Build it (works from any directory)
 
+`VEDA_CORE` below (and `LLVM`/`LD`/`SIM`/`GDB` later) is the real, literal path on the machine
+this guide was verified against -- its own top-level directory happens to be named `rva23-core`,
+predating this repo's current `Veda-Core` name on GitHub. If you cloned via the top-level
+`README.md`'s own one-command setup, your checkout is named `Veda-Core/`, not `rva23-core/` --
+substitute your own clone's actual path here (e.g. `~/Veda-Core/veda-core`) before running these.
+
 ```bash
 VEDA_CORE=/home/prabhu/makerchip/rva23-core/veda-core
 
