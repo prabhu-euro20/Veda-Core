@@ -100,6 +100,15 @@ real_handler:
 
     li   x21, 0x600D
 
+    # -- explicit override, added when auto-restore-on-mret shipped: this
+    #    handler's own intent is to abandon the compartment, not resume
+    #    it (matching vc_pcc_generic_trap_reset.S's own precedent).
+    #    veda_mepcc_length still holds the compartment's saved bounds
+    #    from the interrupt's own save-and-reset; clear it explicitly so
+    #    mret's new auto-restore does not undo that choice. --
+    li   t4, 0xFFFF
+    csrw 0x7c3, t4                 # veda_mepcc_length := VEDA_PCC_UNBOUNDED
+
     # NOTE: unlike ecall's mepc (which points AT the trapping ecall
     # instruction, requiring +4 to skip past it), an interrupt's mepc
     # already holds the address of the instruction that was ABOUT to

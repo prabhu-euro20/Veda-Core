@@ -98,6 +98,15 @@ trap_handler:
     li   t3, 0xFFFF
     csrw 0x7c1, t3                 # veda_pcc_length := VEDA_PCC_UNBOUNDED
     csrw 0x7c0, x0                 # veda_pcc_base := 0 (irrelevant once length is unbounded)
+    # -- explicit override, added when auto-restore-on-mret shipped: this
+    #    handler already explicitly re-widens LIVE PCC above (0x7c0/0x7c1),
+    #    but veda_mepcc_length (0x7c2/0x7c3, the SAVED/shadow bounds from
+    #    the fault above) is untouched by that write and still holds the
+    #    abandoned compartment's own Length=0x0004 -- without also
+    #    clearing it here, mret's new auto-restore would silently
+    #    overwrite this handler's own explicit recovery right back into
+    #    the compartment it just deliberately abandoned. --
+    csrw 0x7c3, t3                 # veda_mepcc_length := VEDA_PCC_UNBOUNDED
     la   t3, recovery
     csrw mepc, t3
     mret

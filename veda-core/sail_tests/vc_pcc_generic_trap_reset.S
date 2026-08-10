@@ -70,6 +70,18 @@ real_handler:
 
     li   x21, 0x600D
 
+    # -- explicit override, added when auto-restore-on-mret shipped: this
+    #    handler's own intent (per its own header comment) is to abandon
+    #    the compartment for good, not resume it. Before auto-restore
+    #    existed, leaving live PCC unbounded (already true here, per the
+    #    read above) was sufficient. Now, veda_mepcc_length still holds
+    #    the compartment's original saved bounds (Milestone 21's own
+    #    save-and-reset ran before this handler started), so without this
+    #    explicit clear, mret would auto-restore back into the abandoned
+    #    compartment, undoing this handler's own deliberate choice. --
+    li   t3, 0xFFFF
+    csrw 0x7c3, t3                 # veda_mepcc_length := VEDA_PCC_UNBOUNDED
+
     csrr t3, mepc
     addi t3, t3, 4
     csrw mepc, t3
