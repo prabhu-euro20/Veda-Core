@@ -243,3 +243,16 @@ correctness verified in isolation.
 
 Sail first (this document, complete), then RTL — the same order and reasoning already established
 and followed for every prior milestone in this project.
+
+## 9. Follow-on: Syscall-0 (clean-room OS kickoff)
+
+The switcher/scheduler mechanism this document builds is the load-bearing primitive; the "Syscall-0"
+milestone (`SYSCALL0_MILESTONE_RESULTS.md`) is the first real step of the clean-room, Linux-ABI-
+numbered OS itself — a minimal `write()`/`exit()` pair, real compiled C through the unmodified
+toolchain, hardware-validated Object_ID at the kernel boundary (trapping `veda.bind`), proven both
+positive (real message, real bytes) and negative (a forged Object_ID hard-traps with the exact
+expected cause, `VEDA_CAUSE_OBJECT_NOT_FOUND`). Three real bugs found and fixed along the way,
+including a genuine structural discovery: `VedaShadowPropagation.cpp` never rewrites a function that
+is only ever declared (never defined with a body), which rules out a pointer-parameter hand-written
+syscall shim entirely — the real fix reuses `veda_malloc_raw`'s own `out_oid` scalar out-parameter
+instead, already proven throughout the Toolchain Milestone 9 heap-demo corpus.
