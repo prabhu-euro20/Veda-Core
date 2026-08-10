@@ -135,7 +135,18 @@
 //   - Indirect calls (through a function pointer) are not instrumented --
 //     shadow tracking simply stops at such a call, matching real
 //     SoftBound's own behavior at any ABI boundary with uninstrumented
-//     code.
+//     code. Toolchain Milestone 20-fix (a real compiler crash, TOOLCHAIN_
+//     MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 4): a function with
+//     any non-direct-call use is now left completely unrewritten, BOTH
+//     signature and body (SkippedForNonDirectCallUse) -- previously,
+//     excluding only its signature still let its own body's pre-existing
+//     memory-round-trip machinery mechanically acquire the InvalidOid
+//     sentinel for its own unseeded pointer parameter, wrongly redirecting
+//     dereferences through OCL.D even for genuinely untracked callers. A
+//     tracked pointer that crosses this boundary now gets whatever an
+//     ordinary, un-instrumented raw access would (matching plain C
+//     semantics for a pointer this pass never analyzed at all) -- not a
+//     compiler crash, and not a false "protected" access either.
 //   - Shadow propagation THROUGH a callee's own return value back to its
 //     caller (Toolchain Milestone 20): a module-defined, non-runtime
 //     -helper function whose return type is a pointer is now ALSO given a
@@ -150,11 +161,30 @@
 //     correct-but-not-yet-optimized choice.
 //   - Only 64-bit-wide tracked dereferences are rewritten (see above) --
 //     a real, hardware-forced limit, not a convenience simplification.
+//   - A direct `uintptr_t` round-trip (Toolchain Milestone 20-fix, TOOLCHAIN_
+//     MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 1) -- `ptrtoint`
+//     immediately or eventually paired with `inttoptr`, e.g. C's
+//     `(unsigned long)p` then casting back -- now propagates its shadow
+//     the same "same value, no new instruction" way GEP/BitCast already
+//     do, plus a narrow Store/Load memory-round-trip extension (gated on
+//     `Shadow.count`/an IntToPtrInst use, not blanket-applied to every
+//     ordinary i64) for the common -O0 case where the round-trip passes
+//     through a real stack slot. Deliberately NOT a general integer-taint
+//     analysis: any ARITHMETIC between the ptrtoint and inttoptr (not
+//     just a pure round-trip) is still out of scope, left unrewritten.
+//   - Findings a chained GEP now recurses to the real GlobalVariable root
+//     instead of resolving only one hop (Toolchain Milestone 20-fix,
+//     TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 3) -- see
+//     findGlobalRoot's own comment for the real reasoning (the AccessOffset
+//     computation was never actually hop-count-limited; only root-finding
+//     was).
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -300,6 +330,33 @@ private:
   // shadow arguments at every call site targeting that function).
   DenseMap<Function *, SmallVector<unsigned, 8>> PointerParamIndices;
 
+  // Toolchain Milestone 20-fix (indirect-call crash, TOOLCHAIN_MILESTONE_
+  // 19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 4): functions with a non-direct
+  // -call use are excluded from rewriteSignatures's Targets (see there),
+  // but a real, empirically-found follow-on bug (found and fixed BEFORE
+  // committing this fix, via a dedicated untracked-data control test, not
+  // assumed correct on the first attempt): merely skipping SIGNATURE
+  // rewriting is not enough to leave such a function genuinely alone.
+  // propagateInFunction runs on EVERY function unconditionally regardless
+  // of Targets membership -- and its own pre-existing (Milestone 8-era,
+  // unrelated to this fix) "address not tracked" Store/Load fallback
+  // unconditionally persists/recovers a shadow (using the InvalidOid
+  // sentinel when none is known) for ANY pointer value round-tripped
+  // through ANY local alloca, REGARDLESS of whether a real shadow was
+  // ever seeded for it. Without this set, an excluded function's own
+  // UNSEEDED pointer parameter would still mechanically acquire the
+  // InvalidOid sentinel via that fallback, causing its own dereferences
+  // to be wrongly redirected through OCL.D with an invalid Object_ID --
+  // for BOTH genuinely-tracked AND genuinely-ordinary callers alike, since
+  // this analysis is intraprocedural and has no visibility into which
+  // caller (direct or indirect) is active. The correct, complete fix:
+  // such a function's BODY must also be left completely unprocessed (the
+  // same "left completely unrewritten" posture this pass already uses
+  // for VLA allocas and out-of-scope global GEP shapes), not merely its
+  // signature -- see the `run()` function's own Funcs loop, gated on this
+  // set.
+  SmallPtrSet<Function *, 8> SkippedForNonDirectCallUse;
+
   // Toolchain Milestone 20: return-value shadow propagation, closing the
   // real, previously-stated gap ("Shadow propagation THROUGH a callee's
   // own return value back to its caller is not yet implemented" -- see
@@ -350,16 +407,35 @@ private:
   // GlobalVariable operand (a scalar global, or element/field 0 of an
   // aggregate -- needs no GEP at all, offset 0 is the base address
   // itself) is the third, degenerate shape, handled by the first check.
-  // Only single-level GEPs are handled -- a real, honest, narrow scope
-  // limit (matching this pass's own established convention): a
-  // multi-level GEP chain (e.g. a global array of structs, each
-  // containing an array field) is left completely unrewritten rather
-  // than attempting unverified multi-hop offset accumulation.
+  // Toolchain Milestone 20-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_
+  // RESULTS.md Test 3): a chain of GEPs (e.g. a global ARRAY OF STRUCTS,
+  // `g_arr[i].field`, which Clang lowers as an array-index GEP followed by
+  // a SEPARATE field GEP whose own pointer operand is the FIRST GEP's
+  // result, not @g_arr directly -- confirmed empirically via real -O0 and
+  // -O1 IR dumps this session, at -O1 via InstCombine folding into a
+  // nested GEP ConstantExpr for a constant index, or a chain of real
+  // GetElementPtrInst for a runtime-variable index) previously defeated
+  // the one-hop-only version of this function. Real fix: recurse through
+  // the WHOLE chain instead of resolving only one hop -- this is safe and
+  // sufficient by itself, with NO change needed anywhere else, because the
+  // real AccessOffset computation at every call site
+  // (`ptrtoint(Addr) - ptrtoint(GV)`) already operates on the FINAL,
+  // REAL pointer VALUES, not by symbolically summing individual GEP
+  // indices -- it is correct for any chain depth and any mix of constant/
+  // runtime-variable indices, entirely unmodified by this fix. The
+  // recursion always terminates: each step strictly descends to a GEP's
+  // own pointer operand, and LLVM IR is acyclic in this sense. A chain
+  // that bottoms out at neither a GlobalVariable nor another GEP (e.g. one
+  // passing through a BitCastInst, rare under this project's opaque
+  // -pointer LLVM build, or genuinely rooted at something other than a
+  // global) correctly falls through to nullptr -- left completely
+  // unrewritten, matching this pass's own established convention, not a
+  // new scope limit introduced by this fix.
   GlobalVariable *findGlobalRoot(Value *Addr) {
     if (auto *GV = dyn_cast<GlobalVariable>(Addr))
       return GV;
     if (auto *GEPOp = dyn_cast<GEPOperator>(Addr))
-      return dyn_cast<GlobalVariable>(GEPOp->getPointerOperand());
+      return findGlobalRoot(GEPOp->getPointerOperand());
     return nullptr;
   }
 
@@ -441,8 +517,40 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
     // return value ... not yet implemented" gap (file header comment,
     // TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 2).
     bool ReturnsPtr = F.getFunctionType()->getReturnType()->isPointerTy();
-    if (HasPtrParam || ReturnsPtr)
-      Targets.push_back(&F);
+    if (!HasPtrParam && !ReturnsPtr)
+      continue;
+    // Toolchain Milestone 20-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md
+    // Test 4): a real, deterministic compiler crash was found and root
+    // -caused here -- this loop used to rewrite F unconditionally once it
+    // qualified above, but the real call-site-rewriting logic further down
+    // only ever finds and fixes up DIRECT-CALL users of F
+    // (`CI && CI->getCalledFunction() == F`); any OTHER kind of User (a
+    // function-pointer-valued global's own initializer, an array of
+    // function pointers, anything passing F's own address as an ordinary
+    // Value) is left completely untouched by that logic, yet the final
+    // `F->eraseFromParent()` below still fires unconditionally -- LLVM's
+    // own Value-deletion invariant (materialized_use_empty(), confirmed by
+    // reading llvm/lib/IR/Value.cpp directly) then aborts with
+    // "Uses remain when a value is destroyed!" on ANY such dangling use.
+    // The real, minimal, correct fix: never a NEW capability this pass
+    // needs, and not a case this milestone's own stated scope ever
+    // promised to instrument ("indirect calls ... are not instrumented" --
+    // file header) -- if F has any non-direct-call use, leave F's ENTIRE
+    // signature untouched (matching this pass's own established
+    // "diagnosed and left unrewritten" convention used elsewhere for VLA
+    // allocas and out-of-scope GEP shapes), rather than half-rewriting it
+    // and crashing. A function is either fully instrumented (every direct
+    // call site AND its own body agree on the new ABI) or not touched at
+    // all -- never a partial, ABI-mismatched state.
+    bool HasNonDirectCallUse = llvm::any_of(F.users(), [&](User *U) {
+      auto *CI = dyn_cast<CallInst>(U);
+      return !(CI && CI->getCalledFunction() == &F);
+    });
+    if (HasNonDirectCallUse) {
+      SkippedForNonDirectCallUse.insert(&F);
+      continue;
+    }
+    Targets.push_back(&F);
   }
 
   for (Function *F : Targets) {
@@ -890,6 +998,11 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
   // even though both follow the identical lazy-single-alloca-per-function
   // reuse pattern.
   Value *ReturnShadowSlot = nullptr;
+  // Toolchain Milestone 20-fix (union/type-punning): addresses that have
+  // received AT LEAST ONE pointer-typed store in this function -- see the
+  // StoreInst handling below (where this is populated) and the i64 LoadInst
+  // extension (where it is consulted) for the real reasoning.
+  DenseSet<Value *> PointerStoredAddrs;
   ReversePostOrderTraversal<Function *> RPOT(&F);
   for (BasicBlock *BBPtr : RPOT) {
     BasicBlock &BB = *BBPtr;
@@ -929,6 +1042,51 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
           }
           IRBuilder<> B(BC->getNextNode());
           attach(B, BC, S);
+        }
+        continue;
+      }
+
+      // Toolchain Milestone 20-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_
+      // AUDIT_RESULTS.md Test 1): a direct `uintptr_t` round-trip
+      // (`ptrtoint` immediately or eventually paired with `inttoptr`,
+      // e.g. C's `(unsigned long)p` then `(struct node*)that_value`)
+      // previously lost the shadow entirely -- neither instruction had a
+      // dispatch rule, so a real hardware bind against the fallback
+      // InvalidOid sentinel silently returned zero instead of trapping or
+      // reading real data. Fixed with the SAME "same shadow value, no new
+      // instruction needed" propagation rule GEP/BitCast already use --
+      // PtrToInt keeps the shadow keyed by the resulting i64 SSA value
+      // (not a pointer type, but the Shadow DenseMap is keyed by Value*
+      // regardless of type, and no OTHER code path in this file ever
+      // looks up an i64 value's shadow except the two narrow extensions
+      // below, so this cannot collide with anything), and IntToPtr reads
+      // it back. Deliberately narrow, NOT a general integer-taint
+      // analysis: only a DIRECT round-trip (no intervening arithmetic) is
+      // covered, matching this file's own "left completely unrewritten"
+      // convention for anything past this scope -- a real, honest,
+      // narrow fix for the exact case the audit demonstrated, not a
+      // general claim about arbitrary integer computation.
+      if (auto *PTI = dyn_cast<PtrToIntInst>(&I)) {
+        // No attach() call here (unlike GEP/BitCast above): attach()'s
+        // own real signature is (ptr, i32) -- PTI's RESULT is an i64, not
+        // a pointer, so passing it as attach()'s first argument would be
+        // a real type mismatch (confirmed: this exact call originally
+        // crashed clang with "Calling a function with a bad signature!"
+        // before being caught and fixed here, not assumed safe by
+        // analogy to the GEP/BitCast cases). The Shadow map entry alone
+        // is what is functionally required; attach() is purely an
+        // observability marker for pointer-typed values elsewhere in
+        // this file.
+        if (Value *S = Shadow.lookup(PTI->getOperand(0)))
+          Shadow[PTI] = S;
+        continue;
+      }
+
+      if (auto *ITP = dyn_cast<IntToPtrInst>(&I)) {
+        if (Value *S = Shadow.lookup(ITP->getOperand(0))) {
+          Shadow[ITP] = S;
+          IRBuilder<> B(ITP->getNextNode());
+          attach(B, ITP, S);
         }
         continue;
       }
@@ -1031,11 +1189,43 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
         // Address not tracked (ordinary stack/global/non-Veda-Core memory)
         // -- unchanged Milestone 8 behavior: persist the stored pointer
         // VALUE's own shadow, keyed by the real address.
-        if (!Stored->getType()->isPointerTy())
+        if (Stored->getType()->isPointerTy()) {
+          Value *S = Shadow.lookup(Stored);
+          IRBuilder<> B(SI->getNextNode());
+          B.CreateCall(ShadowStoreFn, {Addr, S ? S : InvalidOid});
+          // Toolchain Milestone 20-fix (union/type-punning gap, found
+          // empirically auditing veda_demo_union_punning.c): remember
+          // that THIS address has been used for a pointer-typed store at
+          // least once in this function -- the real, precise signal the
+          // i64-load extension below needs to recognize a union member
+          // (or any same-address reinterpretation) being read back as an
+          // integer for the FIRST time, distinct from the direct
+          // ptrtoint-round-trip case (which already has its own shadow
+          // via the PtrToIntInst rule, needing no address memory at all).
+          PointerStoredAddrs.insert(Addr);
           continue;
-        Value *S = Shadow.lookup(Stored);
-        IRBuilder<> B(SI->getNextNode());
-        B.CreateCall(ShadowStoreFn, {Addr, S ? S : InvalidOid});
+        }
+        // Toolchain Milestone 20-fix (uintptr_t round-trip, see the
+        // PtrToIntInst/IntToPtrInst dispatch cases above): a `ptrtoint`
+        // result (i64) round-tripped through a real memory round-trip
+        // (e.g. an ordinary -O0 local variable, `unsigned long ip = ...;`)
+        // needs the SAME shadow persistence pointer-typed values already
+        // get -- otherwise the round-trip fix above only helps the
+        // pure-register case, not the far more common -O0 shape where
+        // every local gets its own alloca. Deliberately gated on
+        // `Shadow.count(Stored)` (a real map entry already exists) rather
+        // than unconditional like the pointer-typed case above: an
+        // ORDINARY i64 (a loop counter, an arbitrary computed integer)
+        // never acquires a Shadow entry via any other rule in this file,
+        // so this adds ZERO instrumentation overhead for the overwhelming
+        // majority of i64 stores that have nothing to do with a tracked
+        // pointer -- only a value PROVABLY derived from ptrtoint of a
+        // tracked pointer ever reaches here.
+        if (Stored->getType()->isIntegerTy(64) && Shadow.count(Stored)) {
+          Value *S = Shadow.lookup(Stored);
+          IRBuilder<> B(SI->getNextNode());
+          B.CreateCall(ShadowStoreFn, {Addr, S});
+        }
         continue;
       }
 
@@ -1139,12 +1329,51 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
           continue;
         }
         // Address not tracked -- unchanged Milestone 8 behavior.
-        if (!LI->getType()->isPointerTy())
+        if (LI->getType()->isPointerTy()) {
+          IRBuilder<> B(LI->getNextNode());
+          Value *S =
+              B.CreateCall(ShadowLoadFn, {Addr}, LI->getName() + ".shadow");
+          Shadow[LI] = S;
+          attach(B, LI, S);
           continue;
-        IRBuilder<> B(LI->getNextNode());
-        Value *S = B.CreateCall(ShadowLoadFn, {Addr}, LI->getName() + ".shadow");
-        Shadow[LI] = S;
-        attach(B, LI, S);
+        }
+        // Toolchain Milestone 20-fix (uintptr_t round-trip, PLUS a second,
+        // real, empirically-found gap this same extension now also
+        // closes -- union/type-punning, see veda_demo_union_punning.c):
+        // an i64 load needs a shadow-recovery attempt too, for the SAME
+        // memory-round-trip reason. Unlike the Store side (which can
+        // cheaply check `Shadow.count` on an already-known SSA value
+        // before deciding to instrument), a LOAD's own result is not yet
+        // known at this point, so that same precision is not directly
+        // available here. Narrowed via TWO real, precise, still-cheap
+        // signals instead of a blanket "every i64 load" instrument:
+        //   (a) this SPECIFIC load has at least one IntToPtrInst user (a
+        //       local, O(uses) check) -- the direct-round-trip case
+        //       (`(struct foo*)(unsigned long)p`), where the LOADED value
+        //       itself is about to become a pointer again.
+        //   (b) Addr is in PointerStoredAddrs (a real pointer-typed store
+        //       to this SAME address happened earlier in this function --
+        //       see the StoreInst handling above) -- the union/type
+        //       -punning case (`union { T *ptr; unsigned long bits; }`),
+        //       where the pointer was stored through ONE member and is
+        //       now being READ BACK through a DIFFERENT, same-address
+        //       member as a plain integer, with no direct ptrtoint
+        //       involved at all (empirically confirmed via
+        //       veda_demo_union_punning.c's own pre-pass IR: both members
+        //       alias the identical address, zero offset, no GEP).
+        // An ordinary i64 load matching NEITHER signal (a loop counter, an
+        // arbitrary computed integer -- the overwhelming majority of real
+        // i64 loads) never reaches this call, preserving the original
+        // zero-overhead-when-irrelevant property.
+        if (LI->getType()->isIntegerTy(64) &&
+            (llvm::any_of(LI->users(),
+                         [](User *U) { return isa<IntToPtrInst>(U); }) ||
+             PointerStoredAddrs.count(Addr))) {
+          IRBuilder<> B(LI->getNextNode());
+          Value *S =
+              B.CreateCall(ShadowLoadFn, {Addr}, LI->getName() + ".shadow");
+          Shadow[LI] = S;
+        }
         continue;
       }
 
@@ -1337,7 +1566,8 @@ PreservedAnalyses VedaShadowPropagation::run(Module &M,
 
   SmallVector<Function *, 16> Funcs;
   for (Function &F : M)
-    Funcs.push_back(&F);
+    if (!SkippedForNonDirectCallUse.count(&F))
+      Funcs.push_back(&F);
   for (Function *F : Funcs)
     propagateInFunction(*F);
 

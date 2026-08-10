@@ -111,6 +111,50 @@ run_one veda_demo_container_of /tmp/demo_crt0.o /tmp/demo_container_of.o /tmp/de
   || { echo "veda_demo_container_of_param.c failed"; exit 1; }
 run_one veda_demo_container_of_param /tmp/demo_crt0.o /tmp/demo_container_of_param.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
 
+# Positive: indirect (function-pointer) call with ORDINARY, untracked data
+# -- the fix for the real compiler crash found auditing indirect calls
+# (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 4). A function
+# with a non-direct-call use (its address taken into a function-pointer
+# global) is now left completely unrewritten -- signature AND body -- so
+# the common, legitimate case (function pointers over data that never
+# touches a Veda-Core object) must still compile, link, and run cleanly
+# with zero traps.
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_funcptr_indirect_untracked.o veda_demo_funcptr_indirect_untracked.c \
+  || { echo "veda_demo_funcptr_indirect_untracked.c failed"; exit 1; }
+run_one veda_demo_funcptr_indirect_untracked /tmp/demo_crt0.o /tmp/demo_funcptr_indirect_untracked.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
+# Positive: void* and uintptr_t round-trip, both IN-BOUNDS (the fix for
+# TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 1 -- a direct
+# ptrtoint/inttoptr round-trip now propagates its shadow the same way
+# BitCast already does, plus a narrow Store/Load memory-round-trip
+# extension for i64 values with a real, known shadow). Default (no -D)
+# build exercises both in-bounds sub-cases together.
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_intptr_roundtrip.o veda_demo_intptr_roundtrip.c \
+  || { echo "veda_demo_intptr_roundtrip.c failed"; exit 1; }
+run_one veda_demo_intptr_roundtrip /tmp/demo_crt0.o /tmp/demo_intptr_roundtrip.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
+# Positive: union type-punning (a tracked pointer written through one
+# union member, read back through a DIFFERENT, same-address member as a
+# plain integer, then cast back to pointer -- no ptrtoint involved at
+# all). Real Linux idiom: tagged pointers / packet-header overlays.
+# Requires the PointerStoredAddrs same-address heuristic alongside the
+# uintptr_t fix's own IntToPtrInst-user heuristic.
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_union_punning.o veda_demo_union_punning.c \
+  || { echo "veda_demo_union_punning.c failed"; exit 1; }
+run_one veda_demo_union_punning /tmp/demo_crt0.o /tmp/demo_union_punning.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
+# Positive: a minimal, faithful reproduction of Linux's real
+# rcu_assign_pointer()/rcu_dereference() mechanics (verified against the
+# actual kernel headers this session, not guessed at) -- ptrtoint, a real
+# fence instruction, then a plain WRITE_ONCE-style store; a plain
+# READ_ONCE-style load on the far side. Single-hart only (this whole
+# project's own simulators have no multi-hart execution model -- see
+# TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md for the full, honest
+# scope of what this can and cannot prove).
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_rcu_pattern.o veda_demo_rcu_pattern.c \
+  || { echo "veda_demo_rcu_pattern.c failed"; exit 1; }
+run_one veda_demo_rcu_pattern /tmp/demo_crt0.o /tmp/demo_rcu_pattern.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
 echo "=== Toolchain Milestone 9 (real end-to-end demo) test results ==="
 for r in "${results[@]}"; do echo "$r"; done
 echo "---"

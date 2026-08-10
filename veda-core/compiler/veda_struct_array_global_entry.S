@@ -7,37 +7,79 @@ _start:
 
     la   sp, _stack_top
 
-    # Toolchain Milestone 13 scope-limit probe: hand-written compartment
-    # entry point, directly modeled on veda_global_protect_entry.S, that
-    # invokes a REAL COMPILED C function (veda_demo_struct_array_global.c,
-    # attributed __attribute__((veda_compartment))) whose global is a
-    # STRUCT ARRAY (`struct node g_arr[4]`) accessed via a chained
-    # array-index-GEP + field-GEP pair -- findGlobalRoot's own documented
-    # "Only single-level GEPs are handled" scope limit predicts this
-    # access is left completely UNREWRITTEN (an ordinary LLVM ld/sd, no
-    # OCL.D/OCS.D rewrite). This entry point tests what actually happens
-    # to that unrewritten access at runtime: does it silently succeed (a
-    # real protection gap), or does Milestone 19's blanket purecap
-    # enforcement (any raw load/store while inside a live OCInvoke
-    # compartment hard-traps, regardless of target) catch it anyway?
+    # Toolchain Milestone 20-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_
+    # RESULTS.md Test 3 -> TOOLCHAIN_MILESTONE_20_GLOBAL_GEP_RESULTS.md):
+    # findGlobalRoot now recurses through a GEP chain instead of resolving
+    # only one hop, so `g_arr[i].value` (a global ARRAY OF STRUCTS,
+    # requiring array-index-GEP + field-GEP to resolve back to @g_arr) is
+    # now correctly recognized by Phase B1 -- meaning this entry point,
+    # UNLIKE its own pre-fix version, now genuinely needs the full
+    # bootstrap-minting ceremony (mirrors veda_global_protect_entry.S's own
+    # Step 1 exactly), which it previously never performed (g_arr was never
+    # routed through that path at all before this fix).
     #
-    # Object_IDs 440-448, a fresh block past every milestone's own
-    # highest prior use (Milestone 13 itself used 422-430; 431-439 left
-    # as a buffer for any concurrently-running sibling test) -- confirmed
-    # via grep-audit of every existing .S file's own `li x1, <NNN>`
-    # Object_ID literal before picking this block.
-    #
-    # Unlike veda_global_protect_entry.S, this demo's global (`g_arr`) is
-    # NEVER routed through Phase B1's GlobalVariable-recognition path at
-    # all (findGlobalRoot fails to resolve it), so there is no bootstrap
-    # -minting step to perform here -- no c8/c9/c11 source-region setup,
-    # no veda_rt_init_globals call. g_arr lives in .bss like any ordinary
-    # C global, reached only by the plain ld/sd the compiler already
-    # emits for it.
+    # Object_IDs 440-448 (unchanged range from the pre-fix version) --
+    # 446/447/448 newly added here for the bootstrap step (RODATA_REGION/
+    # DATA_BSS_REGION/CAP_TABLE_REGION), the three IDs this range's own
+    # original "440-448, fresh block" comment already reserved but the
+    # pre-fix version never needed.
 
     # ================================================================
-    # Ordinary compartment-entry ceremony (identical shape to
-    # veda_global_protect_entry.S's own Step 2, renumbered Object_IDs).
+    # Step 1 (NEW): establish the two SOURCE region capabilities (c8, c9)
+    # and the capability-TABLE region (c11), and mint g_arr's own exact
+    # capability, ALL before the first OCInvoke -- "wide open" PCC, real
+    # purecap enforcement not yet active. Identical shape to
+    # veda_global_protect_entry.S's own Step 1.
+    # ================================================================
+    la   t2, __rodata_start
+    la   t3, __rodata_end
+    sub  t4, t3, t2
+    slli t0, t2, 32
+    slli t4, t4, 16
+    ori  t4, t4, 0x0004
+    or   t0, t0, t4
+    li   x1, 446
+    mv   x2, t0
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- RODATA_REGION
+    li   x1, 446
+    .insn i 0x0b, 0x5, x8, x1, 0  # veda.bind c8, x1
+
+    la   t2, __data_start
+    la   t3, __bss_end
+    sub  t4, t3, t2
+    slli t0, t2, 32
+    slli t4, t4, 16
+    ori  t4, t4, 0x000C
+    or   t0, t0, t4
+    li   x1, 447
+    mv   x2, t0
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- DATA_BSS_REGION
+    li   x1, 447
+    .insn i 0x0b, 0x5, x9, x1, 0  # veda.bind c9, x1
+
+    la   t2, __veda_global_cap_table_bytes
+    ld   t2, 0(t2)
+    slli t2, t2, 16
+    ori  t2, t2, 0x000C
+    la   t0, g_veda_global_cap_table
+    slli t0, t0, 32
+    or   t0, t0, t2
+    li   x1, 448
+    mv   x2, t0
+    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- CAP_TABLE_REGION
+    li   x1, 448
+    .insn i 0x0b, 0x5, x11, x1, 0  # veda.bind c11, x1
+
+    la   sp, _stack_top   # re-establish real sp before the ordinary C call
+                          # below (same real fix veda_global_protect_entry.S
+                          # already needed and documented for the identical
+                          # reason -- x2 doubles as sp, clobbered above).
+
+    call veda_rt_init_globals   # mints g_arr's own capability
+
+    # ================================================================
+    # Step 2: ordinary compartment-entry ceremony (unchanged from the
+    # pre-fix version).
     # ================================================================
     la   t0, landing_pad
     slli t0, t0, 32
@@ -68,7 +110,6 @@ _start:
     .insn r 0x5b, 0x1, 0x12, x0, x3, x4  # ocinvoke c3, c4
 
 landing_pad:
-    # -- Establish SSC (identical ceremony to every prior compartment demo). --
     la   t0, _stack_top
     addi t0, t0, -0x800
     slli t0, t0, 32
@@ -85,17 +126,17 @@ landing_pad:
 
     call veda_struct_array_global_thread   # no arguments -- (void)
 
-    # If we get here, the call RETURNED without trapping -- meaning the
-    # unrewritten g_arr[i].value access silently succeeded (the "real
-    # protection gap" branch of the empirical question). Set x24=2 as a
-    # distinct "returned-without-trap" sentinel (distinct from the
-    # ordinary 0=pass/1=fail convention every prior demo used, since
-    # THIS demo's pass/fail question is "did it trap or not", not "was
-    # the arithmetic correct").
-    li   x24, 2
-    mv   x23, a0   # stash the returned value for post-hoc inspection too
-
-    j do_exit
+    # Toolchain Milestone 20-fix: the NORMAL pass/fail convention (unlike
+    # the pre-fix version, whose own question was "did it trap or not") --
+    # g_arr[2].value should now be correctly, capability-checked-ly
+    # computed as 0x2a (42), matching the C source's own real, in-bounds
+    # semantics. A trap here is now a genuine, unexpected failure (this
+    # access is legitimately in-bounds), not the expected/positive outcome
+    # the pre-fix version treated it as.
+    li   x24, 0  # result flag: 0 = pass, 1 = fail
+    li   t0, 0x2a
+    beq  a0, t0, do_exit
+    li   x24, 1
 
 do_exit:
     la   t0, exit_point
@@ -121,30 +162,18 @@ do_exit:
     .insn r 0x5b, 0x1, 0x12, x0, x3, x4  # ocinvoke c3, c4 -- widens PCC back
 
 exit_point:
-    # x24==2 means "returned without trapping" -- report as HALT_FAIL so
-    # this test's PASS/FAIL polarity matches the trap-catcher convention
-    # (veda_demo_oob_neg.c): a trap firing is the EXPECTED/positive
-    # outcome here (purecap catches the unrewritten access), so the
-    # untrapped-return path is the one this script must flag distinctly.
-    # run_veda_struct_array_global_test.sh distinguishes "trapped" from
-    # "ran to completion" purely by sail_riscv_sim's own exit code/output,
-    # same discipline veda_demo_oob_neg.c's own harness already uses --
-    # this HALT_FAIL is a deliberate, informative marker for the
-    # "silently succeeded" branch, not a test-infrastructure failure.
+    li   t0, 0
+    bne  x24, t0, fail
+    RVMODEL_HALT_PASS
+fail:
     RVMODEL_HALT_FAIL
 
 .balign 4
 trap_handler:
-    # A trap here is the EXPECTED/positive outcome for THIS demo's real
-    # empirical question (does purecap catch the unrewritten access) --
-    # unlike every prior compartment demo, where trap_handler firing was
-    # always the FAILURE path. We cannot call csrr from here and still
-    # reliably signal via the normal RVMODEL_HALT_PASS macro (its own
-    # `sd`/`sw` to tohost would ITSELF be just another ordinary,
-    # non-Veda store, at risk of re-triggering the very same purecap
-    # enforcement this handler is trying to report on, mirroring
-    # MILESTONE_19_RESULTS.md's own documented "trap loop" pitfall) --
-    # so, matching that doc's own fix, explicitly clear veda_purecap
-    # before signaling completion.
-    csrw 0x7c5, x0   # clear veda_mode.veda_purecap before HALT signaling
-    RVMODEL_HALT_PASS
+    # Toolchain Milestone 20-fix: a trap here is now a genuine failure --
+    # g_arr[2].value is legitimately in-bounds and should never trap
+    # post-fix.
+    csrw 0x7c5, x0   # clear veda_mode.veda_purecap defensively before
+                     # signaling, mirroring MILESTONE_19_RESULTS.md's own
+                     # documented trap-loop-avoidance fix.
+    RVMODEL_HALT_FAIL
