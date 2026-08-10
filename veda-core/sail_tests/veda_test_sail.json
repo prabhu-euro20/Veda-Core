@@ -80,10 +80,10 @@
       // (i.e. 4-byte alignment), hence there is no configuration
       // parameter for it.
       "direct": {
-        "supported": false
+        "supported": true
       },
       "vectored": {
-        "supported": false,
+        "supported": true,
         "base_alignment": 2
       }
     },
@@ -148,8 +148,9 @@
     }
   },
   "memory": {
-    // 64 for RV64 (no S-mode/Sv39/48/57 address translation is
-    // implemented, so physical == the full xlen address space).
+    // 64 for RV64 (no Sv39/48/57 address translation is implemented --
+    // true regardless of which privilege modes below are enabled -- so
+    // physical == the full xlen address space).
     "physaddr_bits": 64,
     "pmp": {
       "grain": 0,
@@ -478,10 +479,10 @@
       "supported": false
     },
     "S": {
-      "supported": false
+      "supported": true
     },
     "U": {
-      "supported": false
+      "supported": true
     },
     "Zibi": {
       "supported": false
