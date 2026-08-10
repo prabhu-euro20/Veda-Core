@@ -86,6 +86,31 @@ run_one veda_demo_linked_list /tmp/demo_crt0.o /tmp/demo_ll.o /tmp/demo_veda_com
   || { echo "veda_demo_trap_catcher.S failed"; exit 1; }
 run_one veda_demo_oob_neg /tmp/demo_crt0.o /tmp/demo_oob.o /tmp/demo_trap_catcher.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
 
+# Positive: real Linux container_of() pattern -- BACKWARD reconstruction of
+# an enclosing struct's base address via pointer subtraction from an
+# EMBEDDED field's own address (the pattern the Linux-port feasibility
+# research flagged as the structural blocker). Confirms, unmodified, that
+# Clang lowers `(char*)p - offsetof(...)` to a plain negative-index GEP --
+# the same instruction kind the pass's existing GEP-propagation rule
+# already handles generically -- and that Veda-Core's whole-object (not
+# CHERI-style subobject) bounds model has no narrowed boundary to walk
+# back past.
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_container_of.o veda_demo_container_of.c \
+  || { echo "veda_demo_container_of.c failed"; exit 1; }
+run_one veda_demo_container_of /tmp/demo_crt0.o /tmp/demo_container_of.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
+# Positive: container_of() across a real function-call boundary (Toolchain
+# Milestone 20's own real reason to exist) -- a helper RECONSTRUCTS via
+# container_of and RETURNS the pointer; main() dereferences it AFTER the
+# call returns. Requires return-value shadow propagation (the trailing
+# return-shadow out-param VedaShadowPropagation.cpp's rewriteSignatures
+# now appends to any pointer-returning function) -- without it, this
+# exact program previously read back a silent zero
+# (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 2).
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_container_of_param.o veda_demo_container_of_param.c \
+  || { echo "veda_demo_container_of_param.c failed"; exit 1; }
+run_one veda_demo_container_of_param /tmp/demo_crt0.o /tmp/demo_container_of_param.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
 echo "=== Toolchain Milestone 9 (real end-to-end demo) test results ==="
 for r in "${results[@]}"; do echo "$r"; done
 echo "---"

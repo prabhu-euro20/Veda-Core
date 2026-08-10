@@ -137,7 +137,13 @@
 //     SoftBound's own behavior at any ABI boundary with uninstrumented
 //     code.
 //   - Shadow propagation THROUGH a callee's own return value back to its
-//     caller is not yet implemented -- only argument-direction passing.
+//     caller (Toolchain Milestone 20): a module-defined, non-runtime
+//     -helper function whose return type is a pointer is now ALSO given a
+//     trailing return-shadow out-param (pointer-to-i32, appended after
+//     every per-pointer-parameter shadow), generalizing the existing
+//     veda_malloc_raw out-param convention -- see ReturnShadowParamIndex
+//     and TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md's Test 2 for
+//     the real empirical gap this closes.
 //   - Memory-round-trip shadow storage (@veda_shadow_store/_load) is
 //     unconditionally emitted for every pointer store/load in scope, not
 //     narrowed by any points-to/alias analysis -- a real, conservative,
@@ -294,6 +300,26 @@ private:
   // shadow arguments at every call site targeting that function).
   DenseMap<Function *, SmallVector<unsigned, 8>> PointerParamIndices;
 
+  // Toolchain Milestone 20: return-value shadow propagation, closing the
+  // real, previously-stated gap ("Shadow propagation THROUGH a callee's
+  // own return value back to its caller is not yet implemented" -- see
+  // file header, and TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md's
+  // Test 2 for the real empirical demonstration this closes: a tracked
+  // pointer returned by any module-defined function previously lost its
+  // shadow at the call site, silently). Generalizes the EXACT out-param
+  // convention this file's own veda_malloc_raw special case already uses
+  // (Call->getArgOperand(1), an out-param the runtime writes the real
+  // Object_ID through) to ordinary, module-defined, pointer-returning
+  // functions: rewriteSignatures appends ONE trailing i32* out-param (in
+  // addition to, and always AFTER, the existing per-pointer-parameter
+  // shadow params) for any such function; this map records that
+  // out-param's own argument index, keyed by the already-rewritten
+  // Function. Absence from this map means F does not return a pointer (no
+  // out-param was ever appended) -- checked via .find(), not .lookup(),
+  // since index 0 is a real, valid index and cannot double as a "missing"
+  // sentinel.
+  DenseMap<Function *, unsigned> ReturnShadowParamIndex;
+
   static bool isRuntimeHelper(const Function &F) {
     StringRef N = F.getName();
     return N == kMallocRawName || N == kShadowStoreName ||
@@ -405,8 +431,17 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
   for (Function &F : M) {
     if (F.isDeclaration() || isRuntimeHelper(F))
       continue;
-    if (llvm::any_of(F.args(),
-                     [](Argument &A) { return A.getType()->isPointerTy(); }))
+    bool HasPtrParam = llvm::any_of(
+        F.args(), [](Argument &A) { return A.getType()->isPointerTy(); });
+    // Toolchain Milestone 20: a function returning a pointer is now ALSO a
+    // rewrite target, even with zero pointer PARAMETERS (e.g. a real
+    // `struct node *make_default(void)`-shaped helper) -- broadens this
+    // loop's own original pointer-PARAMETER-only condition to close the
+    // real, previously-stated "shadow propagation through a callee's own
+    // return value ... not yet implemented" gap (file header comment,
+    // TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md Test 2).
+    bool ReturnsPtr = F.getFunctionType()->getReturnType()->isPointerTy();
+    if (HasPtrParam || ReturnsPtr)
       Targets.push_back(&F);
   }
 
@@ -419,6 +454,17 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
         PtrIdx.push_back(I);
     for (unsigned I = 0, E = PtrIdx.size(); I != E; ++I)
       NewParams.push_back(I32Ty);
+
+    // Toolchain Milestone 20: one trailing return-shadow out-param
+    // (pointer-to-i32), appended AFTER every per-pointer-parameter shadow
+    // above -- generalizes the veda_malloc_raw out-param convention
+    // (Call->getArgOperand(1) in propagateInFunction) to any module
+    // -defined function returning a pointer. `HasRetShadow`'s own value is
+    // recomputed identically (not cached from the Targets-selection loop
+    // above) since it is cheap and keeps this loop self-contained.
+    bool HasRetShadow = FTy->getReturnType()->isPointerTy();
+    if (HasRetShadow)
+      NewParams.push_back(PtrTy);
 
     FunctionType *NFTy =
         FunctionType::get(FTy->getReturnType(), NewParams, FTy->isVarArg());
@@ -444,6 +490,14 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
       SmallVector<Value *, 8> Args(CI->args());
       for (unsigned I = 0, E = PtrIdx.size(); I != E; ++I)
         Args.push_back(InvalidOid); // placeholder; fixed up in Phase B
+      if (HasRetShadow)
+        // Placeholder -- propagateInFunction's own CallInst handling
+        // replaces this with a real, lazily-created per-CALLER scratch
+        // slot address before the call ever executes (a real Value* is
+        // required here now, a null constant, not the same InvalidOid
+        // sentinel the SCALAR shadow placeholders above use, since this
+        // argument's own type is ptr, not i32).
+        Args.push_back(ConstantPointerNull::get(PtrTy));
       IRBuilder<> B(CI);
       CallInst *NewCI = B.CreateCall(NF, Args);
       NewCI->setCallingConv(CI->getCallingConv());
@@ -461,8 +515,13 @@ bool VedaShadowPropagation::rewriteSignatures(Module &M) {
     // parameter they shadow, matching this project's own established
     // naming discipline (readable IR, not auto-numbered %N operands).
     for (unsigned K = 0, E = PtrIdx.size(); K != E; ++K)
-      NF->getArg(NewParams.size() - PtrIdx.size() + K)
+      NF->getArg(NewParams.size() - PtrIdx.size() - (HasRetShadow ? 1 : 0) + K)
           ->setName(NF->getArg(PtrIdx[K])->getName() + ".shadow");
+    if (HasRetShadow) {
+      unsigned RetShadowIdx = NewParams.size() - 1;
+      NF->getArg(RetShadowIdx)->setName("ret.shadow.out");
+      ReturnShadowParamIndex[NF] = RetShadowIdx;
+    }
 
     PointerParamIndices[NF] = std::move(PtrIdx);
   }
@@ -752,8 +811,21 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
   // Seed: pointer parameters <-> the shadow parameter Phase A appended for
   // them (same order, appended after all original parameters).
   auto PPI = PointerParamIndices.find(&F);
-  if (PPI != PointerParamIndices.end()) {
-    unsigned NumOrig = F.getFunctionType()->getNumParams() - PPI->second.size();
+  if (PPI != PointerParamIndices.end() && !PPI->second.empty()) {
+    // Toolchain Milestone 20: F may ALSO have been given a trailing
+    // return-shadow out-param (if F itself returns a pointer -- see
+    // ReturnShadowParamIndex), appended in NewParams AFTER every
+    // per-pointer-parameter shadow. That extra trailing param must be
+    // subtracted back out here too, or NumOrig is off by one and this loop
+    // seeds Shadow from the WRONG argument (the return-shadow out-param
+    // itself, rather than the real per-parameter shadow) for any function
+    // that both takes pointer parameters and returns a pointer -- a real
+    // bug, found and fixed while implementing this same milestone, before
+    // any test exposed it (F.getFunctionType() here is NF's own, already
+    // -rewritten type, not the original F's).
+    unsigned NumOrig = F.getFunctionType()->getNumParams() -
+                       PPI->second.size() -
+                       (ReturnShadowParamIndex.count(&F) ? 1 : 0);
     IRBuilder<> EntryB(&*F.getEntryBlock().getFirstInsertionPt());
     for (unsigned K = 0, E = PPI->second.size(); K != E; ++K) {
       Argument *PtrArg = F.getArg(PPI->second[K]);
@@ -810,6 +882,14 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
   // it -- PHI handling itself stays entirely in Pass 3 regardless, so
   // this does not reintroduce the cyclic-phi bug already found and fixed).
   Value *ScratchSlot = nullptr; // lazily-created per-function OCL.D out-param
+  // Toolchain Milestone 20: lazily-created per-function scratch slot for
+  // reading back a CALLEE's return-value shadow (see ReturnShadowParamIndex
+  // and the CallInst-handling case below) -- deliberately separate from
+  // ScratchSlot above (different real purpose: that one holds an OCL.D
+  // -loaded raw i64 DATA value; this one holds an i32 Object_ID shadow),
+  // even though both follow the identical lazy-single-alloca-per-function
+  // reuse pattern.
+  Value *ReturnShadowSlot = nullptr;
   ReversePostOrderTraversal<Function *> RPOT(&F);
   for (BasicBlock *BBPtr : RPOT) {
     BasicBlock &BB = *BBPtr;
@@ -1125,14 +1205,69 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
         if (!Callee || isRuntimeHelper(*Callee))
           continue; // indirect call, or a runtime primitive -- out of scope
         auto It = PointerParamIndices.find(Callee);
-        if (It == PointerParamIndices.end())
-          continue; // callee has no pointer params, or was never rewritten
-        unsigned NumOrig =
-            Callee->getFunctionType()->getNumParams() - It->second.size();
-        for (unsigned K = 0, E = It->second.size(); K != E; ++K) {
-          Value *OrigArg = Call->getArgOperand(It->second[K]);
-          Value *S = Shadow.lookup(OrigArg);
-          Call->setArgOperand(NumOrig + K, S ? S : InvalidOid);
+        auto RIt = ReturnShadowParamIndex.find(Callee);
+        if (It == PointerParamIndices.end() &&
+            RIt == ReturnShadowParamIndex.end())
+          continue; // callee has no pointer params and doesn't return a
+                    // pointer, or was never rewritten
+        bool HasRetShadow = RIt != ReturnShadowParamIndex.end();
+        unsigned PtrShadowCount =
+            It != PointerParamIndices.end() ? It->second.size() : 0;
+        // Both trailing param groups (per-pointer-parameter shadows, then
+        // -- always AFTER those -- the single return-shadow out-param, see
+        // rewriteSignatures) were appended past the function's original
+        // arity; subtracting both back out recovers where the ORIGINAL
+        // parameters end and the appended ones begin, regardless of which
+        // of the two groups (or both) this particular Callee has.
+        unsigned NumOrig = Callee->getFunctionType()->getNumParams() -
+                           PtrShadowCount - (HasRetShadow ? 1 : 0);
+        if (It != PointerParamIndices.end()) {
+          for (unsigned K = 0, E = It->second.size(); K != E; ++K) {
+            Value *OrigArg = Call->getArgOperand(It->second[K]);
+            Value *S = Shadow.lookup(OrigArg);
+            Call->setArgOperand(NumOrig + K, S ? S : InvalidOid);
+          }
+        }
+        if (HasRetShadow) {
+          // Toolchain Milestone 20: generalizes the malloc_raw out-param
+          // convention above to ordinary module-defined, pointer-returning
+          // functions -- one shared, lazily-created scratch slot per
+          // CALLING function (mirrors ScratchSlot's own established
+          // lazy-per-function-reuse idiom for OCL.D loads elsewhere in
+          // this same Pass 2 loop): safe to reuse across multiple call
+          // sites within F, since each call's resulting shadow is read
+          // back and cached into the Shadow map immediately after that
+          // one call, before any later call could overwrite the slot.
+          if (!ReturnShadowSlot) {
+            IRBuilder<> EntryB(&*F.getEntryBlock().getFirstInsertionPt());
+            ReturnShadowSlot =
+                EntryB.CreateAlloca(I32Ty, nullptr, "veda.ret.shadow.scratch");
+          }
+          Call->setArgOperand(RIt->second, ReturnShadowSlot);
+          IRBuilder<> B(Call->getNextNode());
+          Value *RetShadow = B.CreateLoad(I32Ty, ReturnShadowSlot,
+                                          Call->getName() + ".retshadow");
+          Shadow[Call] = RetShadow;
+          attach(B, Call, RetShadow);
+        }
+        continue;
+      }
+
+      if (auto *RI = dyn_cast<ReturnInst>(&I)) {
+        // Toolchain Milestone 20: the write-back half -- if F ITSELF was
+        // rewritten with a trailing return-shadow out-param (F returns a
+        // pointer type, see rewriteSignatures), store the returned
+        // pointer's own known shadow (or InvalidOid, the same "unknown"
+        // default used everywhere else in this pass) through that
+        // out-param immediately before returning, so the CALLER's own
+        // CallInst-handling above has something real to load back.
+        auto RIt = ReturnShadowParamIndex.find(&F);
+        if (RIt != ReturnShadowParamIndex.end() && RI->getReturnValue() &&
+            RI->getReturnValue()->getType()->isPointerTy()) {
+          Value *RetVal = RI->getReturnValue();
+          Value *S = Shadow.lookup(RetVal);
+          IRBuilder<> B(RI);
+          B.CreateStore(S ? S : InvalidOid, F.getArg(RIt->second));
         }
         continue;
       }

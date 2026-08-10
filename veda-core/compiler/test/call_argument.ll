@@ -16,15 +16,29 @@ entry:
   ret ptr %res
 }
 
-; The callee gains a trailing i32 shadow parameter and attaches it to its
-; own pointer argument at entry.
-; CHECK: define ptr @callee(ptr %in, i32 %in.shadow)
+; The callee gains a trailing i32 shadow parameter (for its pointer
+; PARAMETER) AND, since it also RETURNS a pointer, a further trailing
+; return-shadow out-param (Toolchain Milestone 20) -- attaches the param
+; shadow at entry, and writes that same shadow through the return-shadow
+; out-param immediately before returning (the returned value IS %in
+; itself, so its shadow IS %in.shadow).
+; CHECK: define ptr @callee(ptr %in, i32 %in.shadow, ptr %ret.shadow.out)
 ; CHECK-NEXT: entry:
 ; CHECK-NEXT: call void @veda_shadow_attach(ptr %in, i32 %in.shadow)
+; CHECK-NEXT: store i32 %in.shadow, ptr %ret.shadow.out
 ; CHECK-NEXT: ret ptr %in
 
 ; The call site passes the real, computed shadow (%oid) as the extra
 ; argument, not the placeholder sentinel.
 ; CHECK: %p = call ptr @veda_malloc_raw(i64 %sz, ptr %oid_slot)
 ; CHECK-NEXT: %oid = load i32, ptr %oid_slot
-; CHECK: %res = call ptr @callee(ptr %p, i32 %oid)
+
+; @caller ALSO returns a pointer, so it gains its own trailing
+; return-shadow out-param and a lazily-created scratch slot to receive
+; @callee's return-shadow write-back through -- then chains that value on
+; into @caller's OWN return-shadow out-param, proving the mechanism
+; composes correctly across nested/chained function-return boundaries, not
+; just a single call depth.
+; CHECK: %res = call ptr @callee(ptr %p, i32 %oid, ptr %veda.ret.shadow.scratch)
+; CHECK-NEXT: %res.retshadow = load i32, ptr %veda.ret.shadow.scratch
+; CHECK: store i32 %res.retshadow, ptr %ret.shadow.out

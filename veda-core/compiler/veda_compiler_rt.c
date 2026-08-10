@@ -78,20 +78,36 @@ uint32_t veda_shadow_load(void *key) {
   return 0xFFFFFFFFu; // VEDA_OBJ_INVALID sentinel, matching veda_rt.h
 }
 
-// Thin wrappers around Milestone 7's own already-verified primitives --
-// the `bool` success/fail return is deliberately ignored, matching that
-// milestone's own established "let real hardware/runtime enforce
-// correctness, don't redundantly software-check" philosophy: a real
-// failure (bad object_id, permission violation, out-of-bounds offset)
-// hard-traps inside veda_ocl_d/veda_ocs_d's own real Veda-Core
-// instructions, which is exactly the intended, observable behavior for
-// this milestone's own negative (out-of-bounds) demo.
+// Toolchain Milestone 19-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md):
+// this pair used to route through veda_rt.h's veda_ocl_d/veda_ocs_d
+// (Milestone 7's own graceful, bool-returning, veda.bind.notrap-based
+// API), discarding the bool -- the ORIGINAL comment here claimed "a real
+// failure ... hard-traps inside veda_ocl_d/veda_ocs_d's own real Veda
+// -Core instructions," which was simply wrong for a bad/invalid
+// object_id specifically: veda.bind.notrap soft-fails (untagged c1, no
+// trap) by design, and OCL.D/OCS.D against an untagged capability is
+// itself a silent, non-trapping no-op (real, empirically confirmed this
+// session -- see the results doc). Since the compiler-generated access
+// path (this file's whole reason to exist) NEVER wants graceful
+// degradation -- an invalid Object_ID reaching here always means a real
+// provenance-tracking gap in the pass itself, not a legitimate recoverable
+// condition -- it now binds via veda_bind_scratch_trap_asm (the TRAPPING
+// veda.bind, runtime/veda_rt_asm.S) instead, a real hardware enforcement
+// mechanism, not a new software check. veda_rt.h's own veda_ocl_d/
+// veda_ocs_d and their .notrap contract are untouched, still exactly as
+// Milestone 7 designed them, for their own direct C callers.
+extern void veda_bind_scratch_trap_asm(uint64_t object_id);
+extern void veda_ocl_d_scratch_asm(uint64_t offset, uint64_t *out);
+extern void veda_ocs_d_scratch_asm(uint64_t offset, uint64_t value);
+
 void veda_rt_ocl_d(uint32_t oid, uint64_t offset, uint64_t *out) {
-  (void)veda_ocl_d((veda_obj_t)oid, offset, out);
+  veda_bind_scratch_trap_asm((uint64_t)oid);
+  veda_ocl_d_scratch_asm(offset, out);
 }
 
 void veda_rt_ocs_d(uint32_t oid, uint64_t offset, uint64_t value) {
-  (void)veda_ocs_d((veda_obj_t)oid, offset, value);
+  veda_bind_scratch_trap_asm((uint64_t)oid);
+  veda_ocs_d_scratch_asm(offset, value);
 }
 
 // Toolchain Milestone 12: pass-facing ABI for alloca-protected stack

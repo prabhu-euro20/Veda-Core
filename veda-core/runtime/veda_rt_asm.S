@@ -44,6 +44,27 @@ veda_bind_scratch_asm:
     cgettag a0, c1
     ret
 
+# void veda_bind_scratch_trap_asm(uint64_t object_id /*a0*/)
+# Toolchain Milestone 19-fix (TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md):
+# binds c1 via the TRAPPING veda.bind (mode 0b00), not .notrap -- for the
+# compiler-pass-facing access path (veda_compiler_rt.c's veda_rt_ocl_d/
+# veda_rt_ocs_d) specifically, which never wants graceful degradation on a
+# bad Object_ID. veda_bind_scratch_asm above stays exactly as-is (still
+# .notrap): veda_rt.h's own public veda_ocl_d/veda_ocs_d API deliberately
+# keeps its established bool-return, recoverable-failure contract for its
+# own direct C callers (Milestone 7's own design) -- this is a new,
+# separate entry point, not a change to that one. Real hardware -- the
+# already-existing, already-tested plain veda.bind mode -- does the
+# enforcement here; no new software check is added anywhere. Confirmed via
+# direct TableGen read (RISCVInstrInfoXVeda.td: `VEDA_BIND : VedaBind<0b00,
+# "veda.bind">`) that the real mnemonic (not hex .insn) is genuinely
+# assembler-recognized, exactly like veda.bind.notrap already used just
+# below.
+.global veda_bind_scratch_trap_asm
+veda_bind_scratch_trap_asm:
+    veda.bind c1, a0
+    ret
+
 # void veda_ocl_d_scratch_asm(uint64_t offset /*a0*/, uint64_t *out /*a1*/)
 # Reads via c1, already bound by a prior veda_bind_scratch_asm call. Does
 # NOT itself guard against an out-of-bounds/permission-violating offset --
