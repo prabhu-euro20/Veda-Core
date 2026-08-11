@@ -137,8 +137,19 @@ RTL testbench convention (GPR-readback sentinels + fixed cycle budget, no `tohos
 corrupted expected destination byte flips PASS to FAIL, confirming the test is non-vacuous). Full RTL
 smoke-test regression: **52/52 passed**. ACT4 RV64I conformance: **51/51 passed**. Zero regressions.
 
-The forged-Object_ID negative case (Task #299's own RTL parity) remains a natural, closely-following
-next step, not yet started.
+The forged-Object_ID negative case (Task #299's own RTL parity, `rtl/sim/veda_smoke_syscall0_kernel_forged_neg.S`)
+is now also done. Reuses Part C's own real KERNEL dispatcher **unchanged** (`do_sys_write`/`do_sys_exit`/
+`copy_loop`/macros are byte-for-byte identical, matching the Sail side's own "reuse hello_world.c
+unchanged" philosophy) -- the only change is `compartment_u`'s own request: `a1=99999` instead of the
+real `132`. Proven two ways, not just "did it fail": `mepc` points at the exact trapping instruction
+(`do_sys_write`'s own first instruction, confirming this is really the very first thing it attempted,
+not something later), and `KERNEL_CONSOLE_BUF`'s own real backing memory stays observably all-zero
+(direct proof no data movement happened, not an inference from the cause code alone). `mcause=0x18`,
+`mtval=0x65` (`cap_idx=3` -- the KERNEL's own `c3`, `do_sys_write`'s trapping-bind target --
+`cause=0x05`, `VEDA_CAUSE_OBJECT_NOT_FOUND`) -- an exact match to the Sail side's own real observed
+value. Mutation-tested: swapping the forged id for the real one (`132`) makes the bind succeed and the
+whole round trip silently complete, correctly flipping the test to FAILED -- confirming it is
+non-vacuous. Full RTL smoke regression: **53/53**. ACT4 conformance: **51/51**. Zero regressions.
 
 ## What remains genuinely, honestly out of scope (not started, not hidden)
 
@@ -176,6 +187,7 @@ Named explicitly, matching this project's own standing "no silent scope creep" d
   `OCInvoke`, `CSeal`, `OSpecialRW`, M21-restore, the M25/M26 full-GPR-save idiom).
 - **RTL mirror** (new, separate pass): `rtl/veda_core.tlv` (M21-restore + M27-mtvec-gate mirrors),
   `rtl/sim/veda_smoke_pcc_restore_on_mret.S`, `rtl/sim/veda_smoke_mtvec_escape_neg.S`,
-  `rtl/sim/veda_smoke_syscall0_kernel.S` (+ matching testbenches), 4 pre-existing RTL negative tests
-  updated for the new auto-restore behavior (see `rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md`
-  for the full list and reasoning) -- all registered in `rtl/run_veda_smoke_test.sh`.
+  `rtl/sim/veda_smoke_syscall0_kernel.S`, `rtl/sim/veda_smoke_syscall0_kernel_forged_neg.S`
+  (+ matching testbenches), 4 pre-existing RTL negative tests updated for the new auto-restore behavior
+  (see `rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md` for the full list and reasoning) -- all
+  registered in `rtl/run_veda_smoke_test.sh`.

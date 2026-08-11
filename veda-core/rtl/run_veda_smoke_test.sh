@@ -312,6 +312,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_s0k.vvp" "$SIM/veda_core.sv" "$SIM/tb_ved
 echo "==> Simulating (RTL Part C: syscall0 kernel)"
 vvp "$SIM/sim_s0k.vvp" +elf_hex="$SIM/veda_smoke_syscall0_kernel.hex"
 
+echo "==> RTL Part D (Task #299 mirror): Compiling (forged, never-populated Object_ID negative test)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_s0kneg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_syscall0_kernel_forged_neg.sv"
+echo "==> Simulating (RTL Part D: syscall0 kernel forged-Object_ID negative)"
+vvp "$SIM/sim_s0kneg.vvp" +elf_hex="$SIM/veda_smoke_syscall0_kernel_forged_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
