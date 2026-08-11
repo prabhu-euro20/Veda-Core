@@ -297,6 +297,21 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_m24ocsctcm.vvp" "$SIM/veda_core.sv" "$SIM
 echo "==> Simulating (Milestone 24 Stage 3 OCL.C/OCS.C TCM scratch)"
 vvp "$SIM/sim_m24ocsctcm.vvp" +elf_hex="$SIM/veda_smoke_m24_ocsc_tcm.hex"
 
+echo "==> RTL M21-restore mirror: Compiling (automatic PCC restore-on-mret, 3 real properties)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_pcc_restore.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_pcc_restore_on_mret.sv"
+echo "==> Simulating (RTL M21-restore mirror)"
+vvp "$SIM/sim_pcc_restore.vvp" +elf_hex="$SIM/veda_smoke_pcc_restore_on_mret.hex"
+
+echo "==> RTL M27-mtvec-gate mirror: Compiling (mtvec self-escape from a live compartment must hard-trap)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_mtvec_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_mtvec_escape_neg.sv"
+echo "==> Simulating (RTL M27-mtvec-gate mirror)"
+vvp "$SIM/sim_mtvec_neg.vvp" +elf_hex="$SIM/veda_smoke_mtvec_escape_neg.hex"
+
+echo "==> RTL Part C (Task #297 mirror): Compiling (real KERNEL ecall dispatcher, sys_write/sys_exit)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_s0k.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_syscall0_kernel.sv"
+echo "==> Simulating (RTL Part C: syscall0 kernel)"
+vvp "$SIM/sim_s0k.vvp" +elf_hex="$SIM/veda_smoke_syscall0_kernel.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

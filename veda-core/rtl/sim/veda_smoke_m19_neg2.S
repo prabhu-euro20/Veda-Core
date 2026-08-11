@@ -82,6 +82,18 @@ trap_handler:
 
     li   x21, 0x600D                 # sentinel: reached the handler with the correct mcause/mtval, purecap still 0
 
+    # RTL M21-restore mirror: mret now auto-restores PCC from
+    # veda_mepcc_base/_length whenever mepcc_length != UNBOUNDED -- this
+    # test's own compartment (Length=0x40) is still captured there
+    # (never cleared), so without this explicit clear, mret below would
+    # re-narrow PCC back down, and the very next fetch (recovery, outside
+    # that 0x40 window) would itself hard-trap. Real, now-necessary fix,
+    # not a workaround -- matches the Sail side's own explicit-override
+    # idiom (write mepcc_length, not the live pcc_length, to opt out of
+    # the automatic restore).
+    li   t4, 0xFFFF
+    csrw 0x7c3, t4                   # veda_mepcc_length := unbounded
+
     la   t4, recovery
     csrw mepc, t4
     mret

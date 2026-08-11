@@ -2641,16 +2641,30 @@
          // inspectable, the same principle CGetTag/CGetType already
          // rely on -- code inside a compartment already knows its own
          // bounds, it got there via the capability that defined them).
+         // RTL M27-mtvec-gate: $csr_is_mtvec added to this OR-list -- see
+         // the real comment at $mtvec's own update logic below for the full
+         // reasoning. Reuses 100% of the already-wired mcause=0x02/
+         // mtval=raw-instr/veda_trap_taken machinery for free.
          $veda_csr_escape_violation = $csr_write_en &&
             ($csr_is_veda_pcc_base || $csr_is_veda_pcc_length ||
              $csr_is_veda_mepcc_base || $csr_is_veda_mepcc_length ||
-             $csr_is_veda_mode) &&
+             $csr_is_veda_mode || $csr_is_mtvec) &&
             ($veda_pcc_length != 16'hFFFF);
          `BOGUS_USE($csr_rdata)
          `BOGUS_USE($csr_wdata)
 
+         // RTL M27-mtvec-gate (Sail-parity mirror, MILESTONE_27_MTVEC_CSR_
+         // GATE_RESULTS.md): mtvec joins $veda_csr_escape_violation's own
+         // CSR list below (the same "same class of gap" that doc's own
+         // "Not yet built" section already named) -- a live compartment
+         // silently CSRRW-ing its own trap handler out from under itself
+         // (installing an attacker-controlled trap target) is now blocked
+         // for the identical real reason the pcc_base/_length/mepcc_*/mode
+         // family already is. Unlike those, mtvec has no trap-reset branch
+         // of its own to piggyback on, so it needs its own explicit guard
+         // here -- matching $veda_mode's own already-established pattern.
          $mtvec[63:0] = $reset ? 64'b0 :
-                        (>>1$csr_write_en && >>1$csr_is_mtvec) ? >>1$csr_wdata :
+                        (>>1$csr_write_en && >>1$csr_is_mtvec && !(>>1$veda_csr_escape_violation)) ? >>1$csr_wdata :
                                                                   >>1$mtvec;
          // RTL Milestone 25 mirror: mscratch, byte-for-byte structural
          // copy of $mtvec's own pattern above -- no hardware-capture
@@ -2778,24 +2792,56 @@
          // shared rs1-capability signal every Custom-2 instruction here
          // already reads), just gated by a different instruction/
          // violation pair.
+         // RTL M21-restore (Sail-parity mirror, MILESTONE_21_PCC_AUTO_RESTORE_
+         // RESULTS.md): automatic PCC restore-on-mret, ported from the Sail
+         // side's own veda_pcc_restore_on_xret(). Priority ordering matches
+         // that design field-for-field: (1) a real trap always wins (already
+         // the top-priority branch, unchanged); (2) a real mret consuming a
+         // genuinely-saved mepcc (length != UNBOUNDED, i.e. a real
+         // compartment WAS captured there, not just "some trap happened
+         // while already unbounded") restores; (3) OCInvoke/OCReturn
+         // (unchanged); (4) explicit CSRRW/CSRRS (unchanged, still honored
+         // -- software retains full override, this is a default not a
+         // forced behavior, matching the Sail side's own explicit-override
+         // test property); (5) retain.
          $veda_pcc_base[31:0] = $reset ? 32'b0 :
                                  (>>1$veda_trap_taken) ? 32'b0 :
+                                 (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? >>1$veda_mepcc_base :
                                  (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_base :
                                  (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_base :
                                  (>>1$csr_write_en && >>1$csr_is_veda_pcc_base) ? >>1$csr_wdata[31:0] :
                                                                                    >>1$veda_pcc_base;
          $veda_pcc_length[15:0] = $reset ? 16'hFFFF :
                                    (>>1$veda_trap_taken) ? 16'hFFFF :
+                                   (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? >>1$veda_mepcc_length :
                                    (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[15:0] :
                                                                                        >>1$veda_pcc_length;
+         // Real bug found (not copied blindly from Sail) while designing
+         // this mirror: the pre-existing trap-time capture below was
+         // UNCONDITIONAL (captured on every trap, even one that fired while
+         // PCC was already unbounded). Harmless while nothing auto-consumed
+         // mepcc -- but once mret starts consuming it automatically (above),
+         // a second, nested trap between a first trap's save and its own
+         // later mret would silently overwrite the first trap's real saved
+         // bounds with {don't-care, UNBOUNDED}. Fixed by gating the capture
+         // itself on `>>1$veda_pcc_length != 16'hFFFF` (a compartment was
+         // genuinely live at the moment of the trap) -- exactly the Sail
+         // side's own already-adversarially-reviewed conditional-capture
+         // design (veda_pcc_save_and_reset()'s own guard). Self-consuming:
+         // a successful mret-restore immediately resets mepcc back to
+         // {0, UNBOUNDED} so a stale value can never be restored twice --
+         // the identical self-consuming property the Sail side's own design
+         // already proved necessary for the same nested-trap hazard class.
          $veda_mepcc_base[31:0] = $reset ? 32'b0 :
-                                   (>>1$veda_trap_taken) ? >>1$veda_pcc_base :
+                                   (>>1$veda_trap_taken && (>>1$veda_pcc_length != 16'hFFFF)) ? >>1$veda_pcc_base :
+                                   (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? 32'b0 :
                                    (>>1$csr_write_en && >>1$csr_is_veda_mepcc_base) ? >>1$csr_wdata[31:0] :
                                                                                        >>1$veda_mepcc_base;
          $veda_mepcc_length[15:0] = $reset ? 16'hFFFF :
-                                     (>>1$veda_trap_taken) ? >>1$veda_pcc_length :
+                                     (>>1$veda_trap_taken && (>>1$veda_pcc_length != 16'hFFFF)) ? >>1$veda_pcc_length :
+                                     (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? 16'hFFFF :
                                      (>>1$csr_write_en && >>1$csr_is_veda_mepcc_length) ? >>1$csr_wdata[15:0] :
                                                                                            >>1$veda_mepcc_length;
          // RTL Milestone 18: plain read/write CSR, no other write source

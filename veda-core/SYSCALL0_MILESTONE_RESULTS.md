@@ -118,6 +118,28 @@ a kernel that independently validates it via hardware (`veda.bind`, trapping) be
 and a forged Object_ID is provably, exactly, rejected in hardware. This is the load-bearing security
 property the whole clean-room-OS direction depends on.
 
+## RTL mirror
+
+The KERNEL ecall dispatcher (Step 1 / Task #297) has now been mirrored into RTL
+(`rtl/sim/veda_smoke_syscall0_kernel.S`, Object_IDs 130-134). Two real prerequisite gaps, found by
+directly auditing `rtl/veda_core.tlv` before writing the port (not assumed present because the Sail
+side had them), had to be closed first: RTL had neither M21's automatic PCC restore-on-`mret` nor
+M27's `mtvec`-write compartment-escape gate. Both were mirrored, each with its own new smoke test and
+mutation tests, and Phase 3 of the restore-on-`mret` test surfaced two genuinely new nested-trap bugs
+never previously found or tested on either the Sail or RTL side. Full detail:
+`rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md`.
+
+The RTL port of the dispatcher itself reused the Sail source's exact structure (dispatch on `a7`,
+trapping `veda.bind` on the caller-supplied Object_ID, dword-copy loop, full-GPR-save/restore via the
+already RTL-proven M25/M26 `mscratch`+`OCS.D`/`OCL.D` idiom), adapted only for this project's own
+RTL testbench convention (GPR-readback sentinels + fixed cycle budget, no `tohost`/HTIF) rather than
+`RVMODEL_HALT_PASS/FAIL`. Passed on the first real clocked-simulation run; mutation-tested (a
+corrupted expected destination byte flips PASS to FAIL, confirming the test is non-vacuous). Full RTL
+smoke-test regression: **52/52 passed**. ACT4 RV64I conformance: **51/51 passed**. Zero regressions.
+
+The forged-Object_ID negative case (Task #299's own RTL parity) remains a natural, closely-following
+next step, not yet started.
+
 ## What remains genuinely, honestly out of scope (not started, not hidden)
 
 Named explicitly, matching this project's own standing "no silent scope creep" discipline:
@@ -136,9 +158,11 @@ Named explicitly, matching this project's own standing "no silent scope creep" d
   `TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md`) is why `hello_world.c` writes its message one byte
   at a time rather than via a string-literal initializer -- a real, already-documented scope limit
   this program deliberately stays inside rather than tripping, not new to this milestone.
-- **RTL mirror.** Every fix in this milestone is Sail/LLVM-pass/hand-written-asm only, matching this
-  project's own established Sail-first-then-RTL sequencing. No RTL work attempted or needed yet (this
-  milestone never touched `veda_core.tlv`).
+- **RTL mirror.** ~~Every fix in this milestone is Sail/LLVM-pass/hand-written-asm only... No RTL
+  work attempted or needed yet~~ -- **now done**, see "RTL mirror" section below. Every fix
+  *described above* remains Sail/LLVM-pass/hand-written-asm only (`vc_syscall0_kernel.S` itself was
+  never touched by the RTL pass); the RTL mirror is a separate, new `rtl/sim/*.S` port, not a change
+  to any file listed here.
 
 ## Files
 
@@ -147,6 +171,11 @@ Named explicitly, matching this project's own standing "no silent scope creep" d
 - `compiler/veda_syscall0_hello_world.c`, `veda_syscall0_shim.S`, `veda_syscall0_kernel_entry.S`,
   `run_veda_syscall0_hello_world_test.sh` (Step 2, new)
 - `compiler/veda_syscall0_kernel_entry_forged.S`, `run_veda_syscall0_forged_oid_test.sh` (Step 3, new)
-- No `.sail`/`.tlv` changes anywhere in this milestone -- every fix exercises already-existing,
+- No `.sail`/`.tlv` changes anywhere in Steps 0-3 above -- every fix there exercises already-existing,
   already-verified real instructions and mechanisms (`veda.bind`, `OCL.D`/`OCS.D`, `ODT-Populate`,
   `OCInvoke`, `CSeal`, `OSpecialRW`, M21-restore, the M25/M26 full-GPR-save idiom).
+- **RTL mirror** (new, separate pass): `rtl/veda_core.tlv` (M21-restore + M27-mtvec-gate mirrors),
+  `rtl/sim/veda_smoke_pcc_restore_on_mret.S`, `rtl/sim/veda_smoke_mtvec_escape_neg.S`,
+  `rtl/sim/veda_smoke_syscall0_kernel.S` (+ matching testbenches), 4 pre-existing RTL negative tests
+  updated for the new auto-restore behavior (see `rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md`
+  for the full list and reasoning) -- all registered in `rtl/run_veda_smoke_test.sh`.

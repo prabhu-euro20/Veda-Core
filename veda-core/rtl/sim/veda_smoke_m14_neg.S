@@ -88,6 +88,16 @@ trap_handler:
     li   t3, 0xFFFF
     csrw 0x7c1, t3                 # veda_pcc_length := unbounded
     csrw 0x7c0, x0                 # veda_pcc_base := 0 (irrelevant once length is unbounded)
+    # RTL M21-restore mirror (MILESTONE_21_RESTORE_RTL_RESULTS.md): mret
+    # now auto-restores PCC from veda_mepcc_base/_length whenever
+    # mepcc_length != UNBOUNDED -- this test's own live-register restore
+    # above (0x7c0/0x7c1) is no longer sufficient by itself, since mepcc
+    # still holds the original narrow Length here (never cleared by that
+    # write) and would otherwise re-narrow PCC right back down on the
+    # mret below. Clearing mepcc_length too is the real, now-correct
+    # override idiom -- matches the Sail side's own explicit-override
+    # test property (vc_pcc_auto_restore_on_mret.S) exactly.
+    csrw 0x7c3, t3                 # veda_mepcc_length := unbounded (t3 still 0xFFFF)
     la   t3, recovery
     csrw mepc, t3
     mret

@@ -61,6 +61,13 @@ trap_handler:
 
     li   x21, 0x600D                  # sentinel: reached the handler, veda_mode self-escape genuinely blocked
 
+    # RTL M21-restore mirror: see veda_smoke_m19_neg2.S's own identical
+    # comment -- mepcc still holds this test's real narrow compartment,
+    # so an explicit clear is now required before mret to avoid an
+    # auto-restore re-narrowing PCC right back down.
+    li   t4, 0xFFFF
+    csrw 0x7c3, t4                    # veda_mepcc_length := unbounded
+
     la   t4, recovery
     csrw mepc, t4
     mret
