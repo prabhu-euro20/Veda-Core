@@ -985,10 +985,44 @@
          // $veda_capmem_granule -- SandPiper's own order-independent
          // elaboration within this @0 stage, already relied on
          // throughout this file, makes the forward reference safe).
+         //
+         // R21 FIX (2026-08-16, found independently on the Linux line's
+         // veda-core-sindhu fork of this same Milestone 24 mechanism,
+         // confirmed still live here by direct re-derivation of this
+         // core's own real trap terms, not copied from that fork's fix
+         // text -- this core has no domain/region concepts, so the fix
+         // shape differs). The `!$veda_pcc_violation` guard above is
+         // FETCH-side only; it was never extended to the DATA-side
+         // violations OCL.C/OCS.C and plain Bind can themselves raise.
+         // An access that BOTH violates (bad tag/seal/perm/bounds, or a
+         // Bind ODT-miss/wrong-owner) AND misses its TCM tier still made
+         // `$veda_dram_stall_req` fire, which drives `$veda_dram_busy`,
+         // which the `$pc` mux above ranks ABOVE `$pc_src` -- discarding
+         // the same-cycle trap redirect to `mtvec` while every trap
+         // STATE effect (PCC reset to unbounded, etc.) still fires: a
+         // real compartment escape, not just a missed-handler bug.
+         // `!$veda_bind_trap` is added to the bind arm (safe for all
+         // three bind modes: `$veda_bind_trap` is defined only in terms
+         // of `$is_veda_bind_plain`, so it reads a constant 0 for
+         // Bind-NoTrap/Rebind, changing nothing for those -- neither
+         // ever traps in this core, only plain Bind does, Milestone 13).
+         // `!$veda_oclc_violation && !$veda_ocsc_violation` is added to
+         // the capability-width arm (mutually exclusive by construction,
+         // `$is_veda_ocl_c`/`$is_veda_ocs_c` can't both be the decoded
+         // instruction). Strictly monotone, matching the Linux-line
+         // fix's own reasoning: this can only ever REMOVE a stall, on a
+         // path that traps anyway via `$veda_trap_taken`'s own existing
+         // OR-list -- it cannot create a stall that did not exist, so it
+         // cannot open a new escape. FIX 2 (the Linux line's own
+         // deliberately-deferred correctness fix for stalls swallowing
+         // ordinary taken branches/JAL/JALR/OCInvoke/OCReturn/mret, which
+         // needs restructuring the `$pc` mux itself) is explicitly NOT
+         // attempted in this same pass, for the identical reason that
+         // fork gave: it is not monotone and needs its own test.
          $veda_dram_stall_req =
             !$veda_pcc_violation && !(>>1$veda_dram_busy) &&
-            ((($is_veda_bind_plain || $is_veda_bind_notrap || $is_veda_rebind) && !$veda_odt_tcm_hit) ||
-             (($is_veda_ocl_c || $is_veda_ocs_c) && !$veda_capmem_tcm_hit));
+            ((($is_veda_bind_plain || $is_veda_bind_notrap || $is_veda_rebind) && !$veda_odt_tcm_hit && !$veda_bind_trap) ||
+             (($is_veda_ocl_c || $is_veda_ocs_c) && !$veda_capmem_tcm_hit && !$veda_oclc_violation && !$veda_ocsc_violation));
          // Same-cycle load (NOT >>1$veda_dram_stall_req) -- loading on the
          // >>1-delayed request would add one extra spurious cycle before
          // the counter reflects the real remaining wait, the exact

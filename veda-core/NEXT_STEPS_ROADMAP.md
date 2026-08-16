@@ -916,3 +916,84 @@ copying the Linux line's number by default, and (b) run a synthesis-based critic
 (matching this project's own established practice, e.g. the prior Yosys-based area/critical-path
 study) confirming a wider `OCL.C`/`OCS.C` datapath does not itself threaten single-cycle Fmax --
 a real but much smaller and lower-risk version of the same question compression would have raised.
+
+## DECIDED, 2026-08-16 (same day): the exact widths, and a real synthesis check
+
+**Widths chosen: `Length` and `Offset` both grow 16 -> 24 bits** (max object size 65,536 ->
+16,777,216 bytes). Grounded in this line's own real constants, not the Linux line's numbers:
+`TCM_SCRATCH_SIZE` = 4,096 bytes (`veda_core.tlv:546`) and `ELFMEM_SIZE` = 524,288 bytes
+(`veda_core.tlv:500`, the real simulated-memory ceiling this project's own testbenches run against
+today). 16 MiB is ~32x that current simulation ceiling -- generous headroom without matching the
+Linux line's 256-bit/40-bit format, which this document already named as likely over-widening for
+this line's own "modest, data-structure-sized object" philosophy. `Base` (32 bits, up to 4 GiB)
+is untouched -- not the bottleneck. New capability total: 127 (current named-field sum) + 8 + 8 =
+143, +1 pad = **144 bits (18 bytes)** -- not a power of two, and that is a deliberate, accepted
+trade (`OCL.C`/`OCS.C` move 18 explicit bytes instead of 16; mechanical, not a blocker -- there is
+no architectural requirement that a capability register be a power-of-two byte count, only that
+`veda_core.tlv`'s per-byte pack/unpack arms enumerate the real count, which they will).
+
+**Real synthesis check, same methodology as `SYNTHESIS_CRITICAL_PATH_STUDY.md`** (Yosys 0.58,
+`proc; opt; techmap; opt; abc -g AND,OR,NAND,NOR,XOR,MUX; stat; ltp -noff`, no PDK -- generic
+technology-independent gate analysis, not absolute picoseconds). Three real expressions faithfully
+transcribed from `veda_core.tlv` (not approximated), 16-bit-current vs 24-bit-widened, everything
+else byte-identical between the two: (A) `OCL.C`/`OCS.C`'s real address (`:1772`) + bounds check
+(`:1797`) -- the highest-frequency per-access path; (B) `CSetBounds`'s window check, `Offset` +
+new-length vs `Length` (`:1920`) -- a real, already-shipped instruction; (C) the
+`OCInvoke`/`OCJALR`/`OCReturn`-style target address, `Base+Offset` (`:2072`, identical pattern at
+`:2140`/`:2205`) -- a control-flow-critical path feeding the next fetch address.
+
+| | Longest topological path (gate levels) | Total mapped cells |
+|---|---|---|
+| Current (16-bit `Length`/`Offset`) | **62** | **740** |
+| Widened (24-bit `Length`/`Offset`) | **68** | **921** |
+
+**Honest reading: the cost is real, not free** (contrary to a first-pass guess that an
+already-64-bit-wide comparator would absorb the width change for nothing) -- roughly +10% depth,
++25% cell count on this isolated per-access logic cone. One real methodological caveat, stated
+plainly rather than glossed over: both designs' longest path is reported as terminating at a
+`real_addr` output bit even though `real_addr = Base + rs2_data` does not itself reference
+`Length`/`Offset` in either version -- Yosys's `opt`/`abc` passes restructure logic across a
+module's shared inputs (here, `rs2_data` feeds both the address add and the bounds-check add), so
+this measures the real combined per-access logic cone as a whole, not a perfectly isolated single
+expression. That is a real, disclosed limit on precision, matching the prior study's own "first
+signal, not a final answer" framing -- not a reason to distrust the measured depth/area numbers
+themselves.
+
+**What settles the Fmax question, and why it settles it:** `SYNTHESIS_CRITICAL_PATH_STUDY.md`
+already measured, on this same core, with the same methodology, two paths that are real, shipping,
+and already proven to complete within one cycle today: a plain RV64I load address (114 gate
+levels) and `OCL.D`'s full five-check chain (95 gate levels). The widened 24-bit path (68 gate
+levels) sits comfortably below **both** of those already-working numbers -- it does not even
+approach the depth this exact core has already empirically shown it can absorb in a single cycle.
+This does not prove Fmax is safe (no PDK, no place-and-route, same honest limit the prior study
+named), but it is real, comparative, same-methodology evidence pointing away from the worst-case
+assumption, not merely an unverified hope.
+
+**Status: encoding kind decided (widening), exact widths decided (16->24 bits), Fmax risk
+meaningfully de-risked by real synthesis evidence. Not yet done: the actual Sail respec and RTL
+implementation -- both remain real, separately-scoped implementation work with their own positive/
+negative tests, mutation tests, and full regression, following this project's own standing
+discipline, not silently folded into this design pass.**
+
+## CLOSED, 2026-08-16 (same day): R21 -- DRAM-stall could swallow a real trap redirect
+
+Found on the Linux line while adversarially refuting an unrelated timing claim, then independently
+re-derived and confirmed still live *here* by direct inspection of this line's own current
+`$veda_dram_stall_req` -- not assumed by extension. Milestone 24's stall request gated only on
+`!$veda_pcc_violation` (fetch-side); a DRAM-tier `OCL.C`/`OCS.C`/plain-`Bind` access that also
+violated could still fire the stall, and the `$pc` mux ranks `$veda_dram_busy` above the trap
+redirect -- discarding it while trap state effects still fired. Real, both-directions proof at a
+temporarily nonzero `DRAM_EXTRA_CYCLES=10` (the shipped `E=0` default makes the path structurally
+unreachable): pre-fix, `x20=0xE5CA` (escaped); post-fix, `x20=0x600D` (correctly trapped). Fixed by
+gating the stall's two arms on the real, already-existing violation/trap signals for this arm
+(`!$veda_bind_trap`, `!$veda_oclc_violation && !$veda_ocsc_violation`) -- strictly monotone, can only
+remove a stall on a path that traps anyway. Full regression 54/54 (53 pre-existing + new
+`veda_smoke_r21_dram_stall_trap_neg`), ACT4 51/51, zero regressions. See
+`rtl/MILESTONE_R21_DRAM_STALL_TRAP_FIX_RESULTS.md`. **The correctness-only follow-on (FIX 2-
+equivalent: ordinary branches/jumps/`mret` also silently swallowed during a stall) remains real,
+named, and explicitly not attempted** -- needs its own `$pc`-mux redesign and its own test, matching
+the Linux line's own identical scoping choice.
+
+This was the first, most urgent item of a broader real-time/safety-critical systems audit
+(determinism/WCET, bounded interrupt latency, no unbounded blocking, and a grep-audit for this same
+"stall outranks trap" pattern class elsewhere in the file) -- not yet started as of this entry.

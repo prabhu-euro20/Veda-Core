@@ -317,6 +317,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_s0kneg.vvp" "$SIM/veda_core.sv" "$SIM/tb_
 echo "==> Simulating (RTL Part D: syscall0 kernel forged-Object_ID negative)"
 vvp "$SIM/sim_s0kneg.vvp" +elf_hex="$SIM/veda_smoke_syscall0_kernel_forged_neg.hex"
 
+echo "==> R21 fix: Compiling (DRAM-stall must not swallow a real trap redirect)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_r21.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_r21_dram_stall_trap_neg.sv"
+echo "==> Simulating (R21 fix, shipped DRAM_EXTRA_CYCLES=0 default)"
+vvp "$SIM/sim_r21.vvp" +elf_hex="$SIM/veda_smoke_r21_dram_stall_trap_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
