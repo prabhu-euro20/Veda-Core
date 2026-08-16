@@ -795,6 +795,34 @@
          // EBREAK remains deferred -- not added here.
          $is_ecall = ($instr == 32'h00000073);
 
+         // Real-time/safety-critical audit (2026-08-16, REALTIME_SAFETY_
+         // CRITICAL_AUDIT_RESULTS.md): WFI (funct12=0x105, rs1=rd=0,
+         // funct3=PRIV, opcode=SYSTEM -- full word 0x10500073, distinct
+         // from ECALL/MRET/EBREAK by bits 31:20) was previously
+         // UNDECODED. Verified this was accidentally, not deliberately,
+         // spec-safe: no $is_wfi existed, so WFI matched none of
+         // $reg_write/$veda_trap_taken/$pc_src's own explicit OR-lists
+         // and fell through to an ordinary pc+4 advance -- externally
+         // indistinguishable from the RISC-V spec's own explicitly
+         // -permitted "a legal implementation is to simply implement the
+         // WFI instruction as a NOP" (ISA manual p.715), but fragile:
+         // nothing marked it intentional, so a future hardening pass
+         // that adds a catch-all "unrecognized SYSTEM-opcode word ->
+         // illegal instruction" trap (a reasonable step, given this core
+         // still has no generic illegal-instruction path at all) would
+         // silently start faulting WFI, with no TW-bit mechanism behind
+         // it to make that legal. This decode makes the NOP intentional
+         // and documented, matching every other real instruction in this
+         // file -- it is deliberately NOT wired into $reg_write,
+         // $veda_trap_taken, or $pc_src; its only job is to exist as a
+         // named exclusion any future catch-all must consult.
+         $is_wfi = ($instr == 32'h10500073);
+         // Deliberately not consumed anywhere else in this file -- see
+         // the comment above. Read externally by
+         // veda_smoke_wfi_nop.S's own testbench to prove the decode
+         // itself fires, not just that execution happens not to crash.
+         `BOGUS_USE($is_wfi)
+
          $is_lb  = $op_is_load && ($funct3 == 3'b000);
          $is_lh  = $op_is_load && ($funct3 == 3'b001);
          $is_lw  = $op_is_load && ($funct3 == 3'b010);

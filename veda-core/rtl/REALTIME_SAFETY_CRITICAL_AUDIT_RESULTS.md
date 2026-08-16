@@ -134,17 +134,84 @@ own definitions, not as an existing citation for this exact scenario.
   spec does not require a number; a real safety-critical adoption would want one. Concretely
   computable from what already exists (the fixed `$pc`-mux depth plus the bounded
   `DRAM_EXTRA_CYCLES` cap) -- not attempted this pass, named as the natural next step.
-- **Veda-Core's own custom trap causes have not been cross-checked against RISC-V's official
-  synchronous-exception priority table** (Table 105) for consistency where they overlap with base
-  RV64I exceptions (misaligned access, illegal instruction).
-- **WFI's own real behavior on this core was not audited this pass** -- whether it is legally a
-  NOP here (per §2) and, if it stalls at all, whether it correctly still services a locally-enabled
-  pending interrupt.
+- ~~Veda-Core's own custom trap causes have not been cross-checked against RISC-V's official
+  synchronous-exception priority table~~ -- **CLOSED, see §7 below.**
+- ~~WFI's own real behavior on this core was not audited this pass~~ -- **CLOSED and fixed, see §7
+  below.**
 - **This audit covered the embedded line's single-hart, single-stall-mechanism reality only.**
   None of it transfers automatically to the Linux line's own multi-hart, region/domain-bearing
   fork, which has its own, separate, already-partially-addressed version of this same bug class.
 
+## 7. Follow-up pass, same day: Table 105 cross-check, WFI, and a fresh out-of-the-box security
+   literature search
+
+**Table 105 cross-check -- real bug NOT found, but a real scope gap named.** Direct re-derivation
+of `$veda_trap_taken`/`$veda_trap_cause`'s actual decode logic confirms every Veda-specific cause
+and the two base-RV64I causes this core implements (`is_ecall`, the CSR-escape's forced Illegal
+Instruction) are pairwise mutually exclusive by opcode/funct3 field disjointness or by
+`$veda_pcc_violation`'s own NOP-substitution before decode -- verified against the real decode
+signals, not the inline comments alone. Since no two causes can ever be simultaneously true, the
+if-else *order* of the priority muxes is currently inert (there is no tie for it to break). Table
+105 itself grants custom causes implementation-defined priority and explicitly leaves
+misaligned-vs-fault ordering implementation-defined too -- Veda-Core owes it nothing further there.
+**Real, honest gap, not a bug**: generic illegal-instruction, misaligned-address, and EBREAK (the
+base-ISA codes Table 105's own tier 4 groups together) are entirely unimplemented in this core, so
+the overlap scenarios the table actually exists to arbitrate (e.g. a misaligned `OCL.D` address
+racing a bounds violation) have no code path on either side to check yet -- named for whenever those
+land, not fixed here.
+
+**WFI -- found accidentally-correct, made deliberately-correct.** No `$is_wfi` decode existed;
+every gating list WFI could touch (`$reg_write`, `$veda_trap_taken`, `$pc_src`) is an explicit
+named allow-list, so WFI fell through to a plain `pc+4` advance -- externally indistinguishable
+from the RISC-V spec's own explicitly-permitted "implement WFI as a NOP" (p.715), but **fragile**:
+nothing marked it intentional, and this project's own established pattern (adding a new
+unconditional-trap term to `$veda_trap_taken` as each milestone lands, most recently ECALL) means a
+future "unrecognized SYSTEM-opcode word -> illegal instruction" hardening pass -- a reasonable step,
+given this core still has no generic illegal-instruction path at all -- would have silently started
+faulting WFI, with no TW-bit mechanism behind it to make that legal. **Fixed**: added an explicit
+`$is_wfi = ($instr == 32'h10500073)` decode, deliberately left unwired into any control signal (its
+only job is to exist as a named exclusion any future catch-all must consult), with a `BOGUS_USE`
+matching this file's own convention for intentionally-unconsumed signals. New permanent regression
+test, `veda_smoke_wfi_nop.S`/`tb_veda_smoke_wfi_nop.sv`, confirms both that `$is_wfi` fires exactly
+once (proving the decode itself works, not just that nothing crashed) and that execution correctly
+falls through with no trap and no register write. Full regression **55/55** (54 pre-existing + this
+one), ACT4 **51/51**, zero regressions.
+
+**Two quick, targeted checks prompted by real CVE precedent (CVE-2021-1104, an RTCA-disputed
+mtvec-reset-value ambiguity; CVE-2026-29642/29643, a real, current XiangShan CSR/illegal-instruction
+trap-dispatch hang) -- both confirmed already safe, not fixed because nothing needed fixing.**
+`$mtvec` resets to a defined `64'b0` (`veda_core.tlv:2700`), not an undefined/garbage value -- a
+trap taken before software installs a real handler redirects deterministically to address 0, not an
+attacker-influenced or undefined location, directly avoiding CVE-2021-1104's exact concern. CSR
+reads to any unrecognized address fall through to a defined `64'b0` (`$csr_rdata`'s own final
+`:` arm) rather than propagating an undefined value -- unlike XiangShan's real bug, which was a
+control-flow failure to reach `mtvec` at all, not a data-value issue, so the failure *class* differs
+even setting the value-safety point aside.
+
+**Fresh, out-of-the-box literature search -- one well-established real channel class, assessed
+honestly for whether it opens anything new here; one DoS class named as forward-looking, not
+current-hardware-relevant.** Van Bulck/Piessens/Strackx, "Nemesis" (ACM CCS 2018) is the real,
+canonical primary source for trap-*latency* itself (as opposed to the trap's own reported cause or
+value) leaking information about the interrupted instruction, because delivery only happens after
+the current instruction retires. Assessed against this core specifically: every ordinary
+instruction here is single-cycle and constant-time by construction (no cache, no speculation), so
+there is no "how long did this take" signal to leak *except* via the R21-fixed DRAM-stall path
+itself -- and that path's own timing (TCM-hit vs. TCM-miss) is already directly, legitimately
+readable via `CGetBase` (an object's placement is not secret), the identical closure this project's
+own R20 finding already established for the physically-analogous question. **No new leak found; not
+because the Nemesis mechanism is fictitious, but because this core's own architecture and R20's own
+prior closure already remove the precondition it needs.** Mergendahl et al., "The Thundering Herd"
+(IEEE RTAS 2022, seL4) is a real, rigorous precedent for exception-rate-based interference attacks,
+but it operates at the OS/scheduler level (IPC/budget-accounting abuse across many threads) -- this
+core has no OS or multi-threading built into the hardware itself yet (the Minimal OS Kernel's own
+cooperative scheduler is a separate, much smaller software layer); named as real, relevant context
+for that layer's own eventual design, not a finding against the hardware audited here.
+
 ## Files
 
-No RTL changes in this pass -- this is a verification/audit document. The one prior fix it builds
-on and closes out the reachability question for is `MILESTONE_R21_DRAM_STALL_TRAP_FIX_RESULTS.md`.
+- `rtl/veda_core.tlv` -- the explicit `$is_wfi` decode (documented no-op, `BOGUS_USE`-marked).
+- New: `rtl/sim/veda_smoke_wfi_nop.S` + `tb_veda_smoke_wfi_nop.sv`.
+- `rtl/run_veda_smoke_test.sh` -- registers the new test.
+
+The prior fix this document builds on and closes out the reachability question for is
+`MILESTONE_R21_DRAM_STALL_TRAP_FIX_RESULTS.md`.

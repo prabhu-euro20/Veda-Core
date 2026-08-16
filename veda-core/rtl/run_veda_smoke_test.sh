@@ -322,6 +322,11 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_r21.vvp" "$SIM/veda_core.sv" "$SIM/tb_ved
 echo "==> Simulating (R21 fix, shipped DRAM_EXTRA_CYCLES=0 default)"
 vvp "$SIM/sim_r21.vvp" +elf_hex="$SIM/veda_smoke_r21_dram_stall_trap_neg.hex"
 
+echo "==> WFI decode: Compiling (must be an explicit, documented NOP -- RISC-V spec p.715)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_wfi.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_wfi_nop.sv"
+echo "==> Simulating (WFI NOP decode)"
+vvp "$SIM/sim_wfi.vvp" +elf_hex="$SIM/veda_smoke_wfi_nop.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
