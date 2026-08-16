@@ -838,3 +838,81 @@ can honestly be called "ready," at which point it becomes the next Tier-1-eligib
 list.** This is a decision, not a deferral disguised as one: it commits to starting §2.12's design
 work now, in parallel, rather than letting "we'll get to it" stand unstated the way the original
 Tier 4 software-ecosystem entry was left standing (and later corrected) in the 2026-08-09 pass.
+
+## DECIDED, 2026-08-16: field widening, not CHERI-Concentrate-style compression
+
+Tier 1 item 1 above left the encoding choice open ("CHERI-style compressed bounds, or a narrower
+fixed-point widening"). That choice is now made, after reading the official CHERI ISA specification
+(`specs/cheri-architecture.pdf` -- Section 2.3.11 p.58, Sections 3.5.3/3.5.4 pp.90-105, Section 9.23
+"Semantic Goals"/"Precision Effects for Compressed Capabilities" pp.333-345, Section 11.2
+"Compressed Capability Optimizations" pp.354-365, Appendices D/E pp.523-541) in full, the official
+CHERI Concentrate paper (Woodruff et al., IEEE Trans. Computers 2019, read in full from the authors'
+own Cambridge CL open-access copy, not a third party), a search for independent security critique of
+this specific mechanism, and this line's own current `veda_core.tlv`/`VEDA_CORE_SPEC.md`.
+
+**Decision: widen `Length`/`Offset` in place. Do not adopt CHERI Concentrate's compressed
+(exponent+mantissa) bounds encoding for this line.**
+
+**Reasoning, security first (this project's stated main goal):**
+
+1. **CHERI's own spec discloses a real, named residual risk that applies directly to this project,
+   not hypothetically.** Section 9.23.2 (p.334-335), quoted verbatim: *"128-bit CHERI can provide
+   precise subsetting for smaller subsets, but may experience precision effects for larger subsets.
+   These are accepted in our programmer model, and **could permit buffer overflows between
+   subsets**, which would be prevented in the 256-bit model."* This risk is specific to
+   `CSetBounds`-based narrowing of an already-live capability (as opposed to a fresh allocation) --
+   and `CSetBounds`/`CSetBoundsExact` are not hypothetical here, they are this line's own real,
+   already-shipped instructions (RTL Milestone 3). Adopting compression would import this exact,
+   self-disclosed CHERI risk class into a mechanism this project already exposes to software today.
+
+2. **The mitigation CHERI's own spec requires for this risk (`CSetBoundsExact` + `CRAM`/`CRRL`
+   allocator cooperation, p.334-335, p.335 S9.23.3) is real and workable, but it is a mitigation for
+   a risk that widening does not create in the first place.** Choosing not to import a risk class
+   beats importing-then-mitigating it, when a working alternative already exists (see point 4).
+
+3. **Compression's real hardware cost assumes pipelining this line does not have.** The spec states
+   decompression "generally require[s] the majority of a cycle" (p.357) and that real
+   implementations resolve precise bounds checks "usually in the next pipeline stage" (p.357) --
+   i.e. the cost is real and is hidden by pushing it downstream in a pipeline. `rva23-core` is
+   single-cycle by design, a core identity trait of this specific line, not an incidental
+   implementation detail -- there is no "next stage" to push this into. The CHERI Concentrate
+   paper's own positive hardware result (FPGA synthesis on a Stratix V, "achieves the same [max]
+   frequency as the original 256-bit implementation") was measured on a pipelined design; it is not
+   evidence this holds for a single-cycle core, and no synthesis-based check of that specific
+   question exists yet for this project.
+
+4. **A real, already-verified widening precedent exists inside this project already.** The Linux
+   line ([[veda-core-linux-line]], a separate initiative on the same codebase) hit essentially the
+   same problem at larger scale and chose widening, not compression -- growing the capability from
+   128 to 256 bits (`Base` 56, `Length` 40), Sail 70/70 and RTL verified. That work is a real,
+   working reference to adapt, not a green-field design. It also confirms this project's own
+   precedent leans towards widening when the option is available, independent of this decision.
+
+5. **New, complex logic is where this project's own real bugs have hidden, repeatedly.** CHERI's
+   `SetBounds` algorithm (Appendix D.5, pp.529-532, ~135 lines) computes a new exponent via
+   leading-zero-count, derives rounded base/top mantissa fields, and speculatively pre-computes both
+   the rounded and unrounded paths before a late select (p.357) -- substantial new combinational
+   logic. Widening is comparatively low-novelty: bit-slice re-positioning across roughly 81 lines of
+   `veda_core.tlv` already touching `OCL.C`/`OCS.C` (grep-confirmed), plus CRF/field-read
+   re-slicing -- mechanical work this project's own mutation-testing and regression discipline (RTL
+   smoke + ACT4) is well-suited to catch mistakes in, not new security-relevant arithmetic.
+
+**What this decision is NOT saying:** CHERI Concentrate is real, working, hardware-proven
+engineering -- HOL4 machine-checked correctness proof for the compression arithmetic (over-approximates
+requested bounds by a bounded error, per the 2019 paper), validated on real FPGA silicon at parity
+clock frequency with an uncompressed baseline. No CVE or independent security critique of this
+specific mechanism was found in a real search -- the disclosed risk above is CHERI's own honest
+self-assessment, not an external finding. It was examined rigorously and rejected for *this line's*
+specific constraints (single-cycle, already-exposed `CSetBounds`, an existing simpler alternative),
+not dismissed.
+
+**What this decision does NOT yet settle:** the exact new widths for `Length`/`Offset` (and the new
+total capability width). Blindly matching the Linux line's 256-bit/40-bit choice would likely
+over-widen for this line's own stated philosophy (modest, data-structure-sized objects, not
+Linux-class allocations) at unnecessary hardware cost. **Next concrete step, not yet started:** a
+short design pass (lighter than a full Plan-Mode cycle, since the encoding *kind* is now decided) to
+(a) pick the actual new bit width informed by this line's own real object-size needs rather than
+copying the Linux line's number by default, and (b) run a synthesis-based critical-path check
+(matching this project's own established practice, e.g. the prior Yosys-based area/critical-path
+study) confirming a wider `OCL.C`/`OCS.C` datapath does not itself threaten single-cycle Fmax --
+a real but much smaller and lower-risk version of the same question compression would have raised.
