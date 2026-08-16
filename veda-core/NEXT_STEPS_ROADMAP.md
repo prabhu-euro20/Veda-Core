@@ -997,3 +997,26 @@ the Linux line's own identical scoping choice.
 This was the first, most urgent item of a broader real-time/safety-critical systems audit
 (determinism/WCET, bounded interrupt latency, no unbounded blocking, and a grep-audit for this same
 "stall outranks trap" pattern class elsewhere in the file) -- not yet started as of this entry.
+
+## DONE, 2026-08-16 (same day): the broader real-time/safety-critical audit
+
+See `rtl/REALTIME_SAFETY_CRITICAL_AUDIT_RESULTS.md` for the full write-up. Headline findings, each
+grounded in an official/canonical source read in full: (1) this core's own single-cycle, in-order,
+cache-less, speculation-free design places it in WCET analysis's own *easiest* category (Wilhelm
+et al. 2008), and its fixed-`localparam` DRAM-stall specifically does NOT threaten WCET-analyzability
+by that literature's own criteria; (2) the R21-class bug is exhaustively confirmed closed -- direct
+re-derivation found exactly one hold/stall mechanism in the whole file, so R21's fix is complete,
+not partial; (3) the Linux-line's own deferred "FIX 2" concern (ordinary branches/jumps/`mret`
+swallowed during a stall) is confirmed **not reachable on this core** via direct opcode-encoding
+inspection (the stall-triggering Veda custom0 opcode is structurally disjoint from
+jal/jalr/branch/`mret`'s own opcodes) -- a real closure, not a restatement of "deferred"; (4) the
+seminal priority-inversion paper's bounded/unbounded distinction (Sha/Rajkumar/Lehoczky 1990),
+applied as this project's own extension, classifies the DRAM-stall's delay to a pending trap as
+bounded (a fixed, known cycle cap), not the unbounded/unpredictable kind real-time systems must
+avoid.
+
+**Genuinely still open, named honestly, not assumed clean:** no computed/documented worst-case
+interrupt-to-handler latency number exists yet for this core (RISC-V's own spec leaves this
+implementation-defined, so nothing supplies one for free); Veda-Core's own custom trap-cause
+priority has not been cross-checked against RISC-V's official synchronous-exception priority table
+(Table 105) where they overlap; WFI's real behavior on this core was not itself audited this pass.
