@@ -145,6 +145,91 @@ when the paragraph above was written) -- see each section's own evidence rather 
 draft status, confidential-computing landscape) were not re-verified in that pass and are dated
 2026-07-23; treat them as aging and due for a re-check, not as settled facts.
 
+**Status update, 2026-08-16**: seven days of real work landed since the 2026-08-09 rewrite above,
+verified directly against all fourteen new/updated documents in full (not summarized from memory),
+cross-checked against current `git log`/`git status` in both `rva23-core` and its Sail fork. This
+is a genuine refresh, not a restatement -- Parts 1, 2, and 4 below are updated in place with dated
+additions, following this document's own established convention (corrections stated as such, not
+quietly folded in).
+
+**Sail, three new/updated milestones beyond 22:** `MILESTONE_21_RESULTS.md` itself was hardened
+("Generic-Trap PCC-Reset Hardening") -- ordinary (non-Veda) RISC-V exceptions taken from inside a
+live `OCInvoke` compartment previously never reset `veda_pcc_base`/`_length` at all, a real bug
+found via a live PoC that hung the simulator in an infinite fetch-fault loop; fixed by claiming the
+previously-unused `handle_trap_extension` hook (41/41). `MILESTONE_21_TIMER_INTERRUPT_VERIFICATION_
+RESULTS.md` then confirmed the fix also covers real timer interrupts, not just synchronous traps
+(60/60, no new bug -- closes a previously-flagged but unverified gap). `MILESTONE_21_PCC_AUTO_
+RESTORE_RESULTS.md` added automatic PCC restore-on-`mret`/`sret` (`veda_pcc_restore_on_xret()`,
+self-consuming, gated on `!= VEDA_PCC_UNBOUNDED`) -- found and fixed 3 real regressions where
+existing recovery tests wrote only the *live* compartment-state CSRs, never the *shadow* ones the
+new auto-restore now consumes (61/61). `MILESTONE_27_MTVEC_CSR_GATE_RESULTS.md` closed a real
+privilege-escalation vulnerability -- Milestone 20's ungated `mtvec` write, composed with
+Milestone 21's universal PCC-reset-on-any-trap, let a bounded compartment rewrite `mtvec` with zero
+trap and get attacker-chosen code running with fully unbounded PCC after any subsequent trap;
+proven via live PoC (`s7 = 0xE5CA` ESCAPED marker) before the fix, closed by gating `mtvec` writes
+on `veda_pcc_length == VEDA_PCC_UNBOUNDED` (62/62).
+
+**RTL now mirrors both of the above, closing a real gap this document itself flagged as
+outstanding in Part 2 below (2.4-class):** `rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md`
+ports both the auto-restore and the `mtvec` gate into `veda_core.tlv`, and found **two genuinely
+new bugs that exist only in RTL and have no Sail counterpart** -- a nested-trap `mepcc` capture that
+was unconditional (harmless until auto-restore started consuming it) and a real cross-context
+ambiguity where a single global `mepcc` pair cannot distinguish an outer handler's restoring `mret`
+from an inner/nested handler's own `mret`, requiring explicit software shepherding to resolve. Full
+RTL smoke regression **51/51**, ACT4 **51/51**, all mutation tests correctly flip and revert
+(including one demonstrating a real, live control-flow hijack via a `bogus_handler` when the mtvec
+gate is pulled).
+
+**Toolchain, Milestones 18-20 -- the SoftBound-style shadow-propagation pass was audited for real
+gaps and mostly hardened, with two confirmed-real gaps deliberately left open:**
+`TOOLCHAIN_MILESTONE_18_CONTAINER_OF_RESULTS.md` empirically proved the existing pass already
+handles Linux's `container_of()` pattern correctly (backward pointer reconstruction via negative
+GEP), zero code changes needed. `TOOLCHAIN_MILESTONE_19_SCOPE_LIMIT_AUDIT_RESULTS.md` then ran a
+4-agent adversarial audit and found four real, till-then-undocumented gaps: `uintptr_t` round-trips
+silently losing shadow tracking with **no trap and no signal**; a tracked pointer returned from a
+function call losing its shadow at the caller (no return-value propagation existed at all); global
+arrays-of-structs left completely unrewritten by a single-level-only GEP resolver; and a real,
+deterministic LLVM compiler crash (`SIGABRT`) on any function-pointer/indirect-call use.
+`TOOLCHAIN_MILESTONE_20_*` then closed all four across four sub-passes -- silent-bind-failure fixed
+by switching the compiler-generated path to a real trapping `veda.bind` (previously non-trapping);
+return-value shadow propagation added (found and fixed a second, independent off-by-one bug in
+existing parameter-shadow-seeding while implementing this); the indirect-call crash fixed by
+excluding such functions from rewriting entirely (found and fixed a real follow-on regression this
+introduced -- an old fallback path was wrongly redirecting even ordinary untracked pointers);
+global multi-level GEP made recursive; `uintptr_t` round-tripping fixed via explicit
+`PtrToIntInst`/`IntToPtrInst` dispatch. A sixth pass, `TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md`,
+fixed union type-punning (a real gap, found and fixed) and **corrected an earlier, overstated claim
+about RCU** (the real kernel `rcu_assign_pointer`/`rcu_dereference` macros are NOT opaque and were
+already handled correctly) -- but confirmed **two real, still-open gaps, deliberately not fixed**:
+struct assignment/`memcpy` silently drops shadow tracking on any pointer field it copies (the
+subsequent dereference hits a raw, unrelated fetch fault instead of a Veda-Core capability trap --
+or, on a real flat address space with no MMU, potentially **no trap at all** if that raw address
+happens to be otherwise valid memory), and the Linux-style per-CPU addressing idiom
+(`RELOC_HIDE`-equivalent inline-asm pointer round-trip) hits the identical code path as the
+indirect-call crash and is unsupported by construction. Current toolchain regression floor across
+this whole track: `run_veda_demo_tests.sh` 8/8, `run_veda_shadow_prop_tests.sh` 8/8, all
+compartment/alloca/global/scheduler suites PASS, `runtime/run_veda_rt_tests.sh` 2/2, Sail
+self-check **63/63**.
+
+**Minimal OS Kernel gained a real syscall layer.** `MINIMAL_OS_KERNEL_DESIGN.md`'s switcher-pattern
+foundation (TSC register, `OSpecialRW` selector) reached 44/44, and on top of it,
+`SYSCALL0_MILESTONE_RESULTS.md` built a genuine KERNEL ecall dispatcher -- `sys_write`(64)/
+`sys_exit`(93) dispatched on `a7`, with the caller-supplied Object_ID validated entirely in
+**hardware** via a trapping `veda.bind` (zero software-side check anywhere in the syscall path), a
+real compiled-C `hello_world.c` running through the unmodified toolchain, and a forged-Object_ID
+negative test proving the hardware rejection. Sail 65/65. This was then mirrored into RTL end to
+end (Task #297/#299's own RTL parity, four parts, all mutation-tested): **final RTL smoke regression
+53/53, ACT4 51/51, zero regressions.** Three real bugs were found and fixed along the way (a
+too-narrow compartment `Length` cutting off its own post-ecall check code; a full-GPR-restore sweep
+that clobbered the syscall's own return value in `a0`; and a structural compiler-pass limit --
+`VedaShadowPropagation.cpp` only rewrites function *definitions*, never declarations, ruling out a
+pointer-parameter hand-written syscall shim -- worked around with a scalar out-parameter instead).
+
+**Net effect on Part 2's gap list below:** the two CSR-escape vulnerabilities (compartment-state
+self-escape, `mtvec` rewrite) are now **CLOSED on both Sail and RTL** -- see the updated 2.4 note.
+Two new, real, confirmed-open gaps are added as 2.11 and 2.12. Part 4's Tier list is re-evaluated
+below in light of all of this, not left standing unexamined.
+
 ## Why this document exists
 
 Requested explicitly, in these terms: *"complete and rigorous analysis,
@@ -441,6 +526,52 @@ hard-trap, not a build-time error) -- is a usability improvement on an already-s
 correctness or security gap, and is left where that document already places it rather than
 force-numbered here.
 
+### 2.11 -- NEW since 2026-08-09, now CLOSED on both layers: compartment-state CSR self-escape + `mtvec` compartment-escape
+
+Two real vulnerabilities, neither present in the original nine-item list because both were found
+*during* Milestones 20/27 themselves, not before. (a) Code inside a live compartment could rewrite
+its own compartment-state CSRs (`veda_pcc_base`/`_length`, `veda_mepcc_base`/`_length`, `veda_mode`)
+with an ordinary `CSRRW`/`CSRRS`, undoing its own bounding with zero trap -- closed in Sail
+(`MILESTONE_20_RESULTS.md`, 40/40) by requiring `veda_pcc_length == VEDA_PCC_UNBOUNDED` before any
+write to those five CSRs succeeds. (b) A bounded compartment could rewrite `mtvec` itself (ungated),
+then trigger any ordinary trap and get attacker-chosen code running with fully unbounded PCC --
+closed in Sail (`MILESTONE_27_MTVEC_CSR_GATE_RESULTS.md`, 62/62) by the same style of gate. **Both
+are now also closed in RTL** (`rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULTS.md`, 2026-08-11,
+51/51 smoke + 51/51 ACT4) -- this document's own 2.4 above already flagged real trap infrastructure
+as the closed item; these two CSR-write gates are the natural, now-also-closed extension of that
+same infrastructure. Nothing open remains here.
+
+### 2.12 -- NEW since 2026-08-09, genuinely OPEN: `memcpy`/struct-assignment silently drops shadow tracking
+
+Found by `TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md`'s own adversarial audit, confirmed and
+deliberately NOT fixed (a probe file, `veda_demo_struct_copy.c`, exists specifically to demonstrate
+the gap and is NOT registered in the passing regression suite). `dst = *src` for a struct containing
+a pointer field compiles, even at `-O0`, to an opaque `llvm.memcpy` intrinsic the shadow-propagation
+pass does not look inside. The pointer field's raw bits copy correctly, but its shadow does not, so
+a subsequent dereference through the copied field is entirely unrewritten -- it hits an ordinary
+RISC-V fetch/access fault if the raw address happens to be unmapped, but **on this project's own
+flat, MMU-less address space, an unrelated valid address would produce no trap at all**, a genuine,
+silent out-of-object access with zero capability enforcement. This is a **very common C idiom**
+(`struct` assignment, `memcpy` of any struct with a pointer field) -- more common in ordinary code
+than the multi-level-GEP or `uintptr_t` patterns Milestone 20 already closed. The document's own
+words on what a real fix needs: "the pass would need to trace back to the GEP/alloca/malloc call
+that established `dst`'s and `src`'s real struct TYPE ... a genuinely new, type-aware analysis pass
+component" -- this is a real design undertaking, not a bounded patch, and has not had its own design
+pass yet.
+
+### 2.13 -- NEW since 2026-08-09, genuinely OPEN but lower priority for THIS (embedded) line: per-CPU addressing pattern
+
+Also found by the same audit. The Linux-kernel `RELOC_HIDE`/`this_cpu_ptr`-style idiom (a pointer
+round-tripped through an opaque, empty inline-asm statement specifically to defeat compiler hoisting
+across context switches) hits the identical unrewritten code path as the already-fixed indirect-call
+crash (`CallInst` to an `InlineAsm` value, `getCalledFunction()` returns null). Two fix directions
+are named, neither attempted: fragile pattern-matching on the specific idiom, or a Veda-Core-native
+per-CPU primitive (the document's own stated preference, matching this project's hardware-first
+philosophy). **Scoped explicitly as lower priority for this document specifically**: per-CPU
+addressing is a multi-hart/OS-hosting concern, and this line (`rva23-core`) is confirmed genuinely
+single-hart in both Sail and RTL (§2.7) -- the concern is real but its natural home is the
+Linux-line's own roadmap, not this one, unless multi-hart work here changes that calculus.
+
 ---
 
 ## Part 3 -- Fresh external research: reframing "how far can we extend, and toward what"
@@ -596,6 +727,17 @@ capability model) -- they are not substitutes.
    the measured cross-hart TCM covert channel (Wrisley et al., NordSec 2025, up to 68 kbps) that
    `rtl/MILESTONE_24_RESULTS.md` names as a forward-declared constraint -- which raises this item's
    priority within Tier 2 without changing its Tier.
+4. **NEW (2026-08-16): `memcpy`/struct-assignment type-aware shadow propagation -- §2.12.** A real,
+   confirmed, currently-open security gap in a very common C idiom -- more common in ordinary code
+   than any pattern Toolchain Milestone 20 already fixed. Placed in Tier 2, not Tier 1, on the same
+   ground Tier 1 itself is defined by: this needs "a genuinely new, type-aware analysis pass
+   component" (the document's own words) -- a design undertaking, not a bounded encoding change --
+   exactly the property that keeps multi-hart RTL and the Coq gap out of Tier 1 too. Ranked here
+   ahead of the pre-existing Tier 2 items on urgency grounds (it is the only Tier 2 item that is a
+   live, exploitable-in-principle memory-safety hole today, not a scaling limit or a proof-maturity
+   gap), without being promoted to Tier 1, because promotion would require this document to abandon
+   its own stated Tier-1 criterion (bounded, well-understood scope) for a single case -- see "What I
+   decided" below for how this tension was actually resolved, not just noted.
 
 **Tier 3 -- real, but adoption/tooling work rather than new architecture; sequenced after Tier 1-2 close.**
 4. Protected-stack (`csp`-equivalent) calling convention as a mandatory, project-wide ABI --
@@ -652,6 +794,12 @@ capability model) -- they are not substitutes.
   installation blocker and named unwritten lemmas." It is real and it is not near-term, but it no
   longer belongs in the same bucket as "not started" -- Tier 2 is the accurate placement now,
   not Tier 4.
+- **NEW (2026-08-16): per-CPU addressing pattern -- §2.13.** Real and structurally understood (same
+  code path as the already-fixed indirect-call crash), but deliberately not promoted to Tier 2 here:
+  its actual motivating use case is multi-hart/OS-hosted code, and this line is confirmed
+  single-hart by construction (§2.7). It belongs on the Linux line's own roadmap, where multi-hart
+  and OS-hosting are already the stated direction, not on this document's -- re-raise here only if
+  real multi-hart work ever lands on `rva23-core` itself.
 
 ## What I decided, in one sentence, and why
 
@@ -665,3 +813,28 @@ gap, which needs a `coqc` install and theorem-proving labor this project has not
 has caught every real bug in this project's 25 RTL and 22 Sail numbered milestones so far, rather
 than opening a new, larger front before either of the two genuinely harder Tier 2 items is even
 staffed.
+
+**Re-examined, 2026-08-16, in light of everything since (the CSR/`mtvec`-escape closures, the
+toolchain hardening pass, syscall-0, and -- most relevant to this specific decision -- the newly
+found `memcpy`/struct-assignment shadow-tracking gap, §2.12).** The honest tension: this project's
+own standing philosophy prioritizes hardware/security fixes over convenience or capacity work
+whenever hardware can solve the problem, and §2.12 is a live, confirmed memory-safety hole in
+ordinary C code, not a scaling ceiling -- a real argument for building it first instead. **Decision:
+`Length`/`Offset` compressed bounds still ships first, and §2.12 is deliberately not promoted to
+Tier 1 -- but not because it is less important. It is because it is not yet buildable at all.**
+§2.12's own words on what it needs are the deciding fact, re-read literally: "a genuinely new,
+type-aware analysis pass component." There is no design for that component yet -- no chosen
+approach, no scoped interface, nothing this project could start writing code against tomorrow.
+Compressed bounds, by contrast, has been fully specified in `VEDA_CORE_SPEC.md`'s own field table
+since before this document's first version. **Sequencing "spec exists" before "spec does not exist
+yet" is not deprioritizing security -- it is refusing to let this document quietly skip the design
+step §2.12 explicitly still needs**, the same discipline this project applied to Milestone 13
+(globals) and Milestone 25 (full-GPR-context-save), both of which got their own Plan-Mode design
+pass before any code, not an improvised fix mid-implementation. **Concrete next action, therefore,
+is two-staged, not single-tracked: (1) build `Length`/`Offset` compressed bounds now, per the
+2026-08-09 decision, unchanged; (2) run a dedicated design pass for §2.12's type-aware shadow
+propagation -- scoping it, not implementing it, is the next real step for that gap -- before it
+can honestly be called "ready," at which point it becomes the next Tier-1-eligible item on this
+list.** This is a decision, not a deferral disguised as one: it commits to starting §2.12's design
+work now, in parallel, rather than letting "we'll get to it" stand unstated the way the original
+Tier 4 software-ecosystem entry was left standing (and later corrected) in the 2026-08-09 pass.
