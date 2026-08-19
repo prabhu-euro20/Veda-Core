@@ -541,23 +541,53 @@ are now also closed in RTL** (`rtl/MILESTONE_21_27_RESTORE_MTVEC_GATE_RTL_RESULT
 as the closed item; these two CSR-write gates are the natural, now-also-closed extension of that
 same infrastructure. Nothing open remains here.
 
-### 2.12 -- NEW since 2026-08-09, genuinely OPEN: `memcpy`/struct-assignment silently drops shadow tracking
+### 2.12 -- CLOSED 2026-08-19 (Toolchain Milestone 21): `memcpy`/struct-assignment shadow-tracking gap
 
-Found by `TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md`'s own adversarial audit, confirmed and
-deliberately NOT fixed (a probe file, `veda_demo_struct_copy.c`, exists specifically to demonstrate
-the gap and is NOT registered in the passing regression suite). `dst = *src` for a struct containing
-a pointer field compiles, even at `-O0`, to an opaque `llvm.memcpy` intrinsic the shadow-propagation
-pass does not look inside. The pointer field's raw bits copy correctly, but its shadow does not, so
-a subsequent dereference through the copied field is entirely unrewritten -- it hits an ordinary
-RISC-V fetch/access fault if the raw address happens to be unmapped, but **on this project's own
-flat, MMU-less address space, an unrelated valid address would produce no trap at all**, a genuine,
-silent out-of-object access with zero capability enforcement. This is a **very common C idiom**
-(`struct` assignment, `memcpy` of any struct with a pointer field) -- more common in ordinary code
-than the multi-level-GEP or `uintptr_t` patterns Milestone 20 already closed. The document's own
-words on what a real fix needs: "the pass would need to trace back to the GEP/alloca/malloc call
-that established `dst`'s and `src`'s real struct TYPE ... a genuinely new, type-aware analysis pass
-component" -- this is a real design undertaking, not a bounded patch, and has not had its own design
-pass yet.
+Found by `TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md`'s own adversarial audit. `dst = *src` for a
+struct containing a pointer field compiles, even at `-O0`, to an opaque `llvm.memcpy` intrinsic the
+shadow-propagation pass did not look inside, silently dropping the copied field's shadow (Object_ID).
+
+This entry's own prior wording ("the pass would need to trace back to the GEP/alloca/malloc call that
+established `dst`'s and `src`'s real struct TYPE ... a genuinely new, type-aware analysis pass
+component") turned out to be based on an incomplete premise, found by going to this project's own
+declared reference design's primary source rather than trusting this document's own prior
+characterization: SoftBound (PLDI 2009, `llvm.org/pubs/2009-06-PLDI-SoftBound.pdf`, read in full)
+Section 5.2 already specifies the exact needed technique -- an unconditional, type-blind per-slot
+metadata copy at every constant-length memcpy, explicitly stated as "not foolproof... sufficient" in
+the original paper. No type recovery needed at all.
+
+Closed via two real design iterations (not one) -- see
+`TOOLCHAIN_MILESTONE_21_STRUCT_COPY_SHADOW_DESIGN.md` and
+`TOOLCHAIN_MILESTONE_21_STRUCT_COPY_RESULTS.md` for the full detail:
+1. First version: walk every 8-byte slot at a constant-length memcpy, copy only the shadow
+   (Object_ID), trust the underlying unmodified `llvm.memcpy` for the real bytes.
+2. **Found wrong empirically, not assumed correct**: built, ran under `sail_riscv_sim`, and got a
+   real hardware trap (`VEDA_CAUSE_BOUNDS_VIOLATION`) instead of success. Root cause: every heap
+   object's compile-time "pointer" is the SAME fixed fake-offset-token address
+   (`kVedaNullBase`) -- Milestone 9's own dereference codegen already redirects every real
+   load/store on a tracked object through `veda_rt_ocl_d`/`veda_rt_ocs_d`, so nothing real is ever
+   written at that fake address. A plain `llvm.memcpy` only moves real bytes correctly between two
+   *untracked* addresses; for a tracked side it moves unrelated garbage. Corrected to also move the
+   real VALUE (not just the shadow) through the same `OclFn`/`OcsFn` hardware primitives whenever
+   either side is tracked -- verified against `veda_demo_struct_copy.c` (now passing, registered in
+   `run_veda_demo_tests.sh`), mutation-tested, zero regression on every suite that exercises this
+   pass (`run_veda_shadow_prop_tests.sh` 8/8, `run_veda_demo_tests.sh` 9/9, syscall0 suites,
+   `runtime/run_veda_rt_tests.sh`, Sail self-check 70/70).
+
+A hardware-native alternative (migrating pointer-typed struct fields to real `OCL.C`/`OCS.C`
+capability storage, structurally immune to this whole bug class via byte-granular tag invalidation)
+was found independently and documented as a named, deliberately-deferred future direction -- real
+ABI cost (struct layout change, 32-byte alignment requirement), not committed to without a dedicated
+measurement pass.
+
+**Also found, unrelated**: the full regression sweep for this milestone surfaced four pre-existing,
+structurally-unrelated test failures (`run_veda_alloca_protect_test.sh`,
+`run_veda_global_protect_test.sh`, `run_veda_compartment_test.sh`,
+`run_veda_compartment_nested_test.sh`, `run_veda_sched_demo_test.sh`,
+`run_veda_sched_global_combo_test.sh` -- confirmed pre-existing via the last-committed plugin baseline
+for the first two, and structurally plugin-independent for the other four). Named here rather than
+silently left for rediscovery; not fixed as part of this milestone (out of scope), flagged for a
+future dedicated investigation.
 
 ### 2.13 -- NEW since 2026-08-09, genuinely OPEN but lower priority for THIS (embedded) line: per-CPU addressing pattern
 
@@ -676,6 +706,80 @@ vendors, who are solving an adjacent, complementary problem at a different
 layer. A real system could plausibly use both together (a CCA/TDX-style
 confidential VM, internally memory-safe via a CHERI/Veda-Core-style
 capability model) -- they are not substitutes.
+
+### 3.4 -- 2026-08-19 research survey: four findings, official sources only, none urgent for this line today
+
+Run as a parallel, independent research survey (4 agents, official primary sources
+only) alongside the toolchain-widening-parity fix (TOOLCHAIN_MILESTONE_22_WIDENING_PARITY_RESULTS.md).
+None of these change this document's own Tier recommendations below; all are named
+here per this project's own standing discipline of recording a real finding the
+moment it's found, not deferring it into silent loss.
+
+1. **Formal verification (§2.9): a real strategic fork was found, not just an
+   install blocker.** The project's own declared reference precedent for the
+   tag-invariant lemma this architecture's whole security claim rests on --
+   Nienhuis/Bauereiss/Campbell/Sewell et al., IEEE S&P 2020, and its Morello
+   successor, Bauereiss et al., ESOP 2022 -- is proved in **Isabelle/HOL**, not
+   Coq/Rocq, the backend this project's own Improvement 6 (`SAIL_COQ_EXPORT_RESULTS.md`)
+   already committed to. A real, on-point worked Coq example exists
+   (`rems-project/coq-cheri-capabilities`, official REMS/Cambridge repo) with a
+   directly analogous lemma (`cap_is_valid_bv_and`) to model a first bounded
+   milestone on, but it stops at the capability-datatype layer, not the
+   store-instruction-semantics theorem the full published precedent proves. No
+   documented Coq/stdpp version pin exists for this project's own Sail 0.20.2
+   output (real, bounded dependency-archaeology work, not exotic). Recommendation:
+   before further Coq investment, consciously decide Coq-vs-Isabelle rather than
+   continuing by inertia -- see `TOOLCHAIN_MILESTONE_21_STRUCT_COPY_RESULTS.md`-
+   style "verify before deciding" discipline applied to a strategic choice, not
+   just a bug fix.
+2. **Multi-hart RTL (§2.7): confirmed genuinely NOT more tractable than already
+   assessed -- if anything, worse.** TL-Verilog's own official language
+   specification (both the 1d version this project's `veda_core.tlv` declares and
+   the newer 2a draft) lists parameterized/generic module support outright under
+   its own "What's Missing" section -- a persistent language-level gap, not a
+   SandPiper/tooling choice. Worse than the roadmap's own prior framing
+   ("`MHARTID` is a fixed localparam"): the generated `top` module exposes **no
+   memory-interface ports at all** -- `odt_mem[]`/`dmem[]`/`tag_mem[]` are
+   internal-only arrays (56+ reference sites), so two module instances today would
+   get fully private, disjoint memories, leaving nothing for a real arbiter to
+   arbitrate over. A real fix needs both a TL-Verilog parameterization workaround
+   AND genuine RTL surgery (externalize the memory system into a shared,
+   arbitrated module). Icarus Verilog itself was confirmed NOT the obstacle (its
+   own official docs show trivial multi-instance support). Stays in Tier 2 exactly
+   where it already was; no shortcut found.
+3. **NEW, real, not urgent: repeated-trap/compartment-reset DoS resilience of the
+   OCInvoke/PCC compartment model has never been analyzed.** CHERIoT's own
+   red-team-informed design paper (Amar et al., ACM SOSP '25, official,
+   cross-industry-authored) explicitly names "an attacker repeatedly triggering
+   traps to force a victim compartment to spend all its cycles micro-rebooting" as
+   a known, NOT-prevented-by-capabilities residual risk, with a named mitigation
+   pattern (Gecko's "shadow compartments") that CHERIoT itself has not yet
+   implemented either. Veda-Core's own compartment/trap model (Milestone 14's PCC
+   bounding, Milestone 21's universal-reset-on-trap) has no existing analysis
+   against this specific attack class. Real, concrete, cheap to schedule as a
+   future dedicated design/research pass; not urgent (no active exploit, no
+   contradicted claim).
+4. **NEW, real, not urgent for THIS (embedded, single-cycle, non-speculative) line
+   specifically, but a real forward constraint for any future speculative/
+   pipelined Veda-Core line:** Kim et al., "TikTag: Breaking ARM's Memory Tagging
+   Extension with Speculative Execution," IEEE S&P 2025 (peer-reviewed,
+   arXiv:2406.08719) demonstrates real, >95%-success cache-timing gadgets that
+   recover a deployed tag-check's own pass/fail result via speculative execution,
+   defeating ARM MTE on real hardware -- and Cambridge's own CHERI technical
+   report acknowledges CHERI capability checks remain exposed to the same class of
+   speculative bypass. This core is confirmed single-cycle/non-speculative (no
+   branch prediction, no exposure today), so zero action is needed here. Recorded
+   as a hard, must-design-in-from-day-one constraint for whichever Veda-Core line
+   eventually adds branch prediction or speculative fetch (the Linux/pipelined
+   line, not this one) -- the CHERI project's own explicit lesson from Morello
+   (Watson et al., UCAM-CL-TR-986) is that retrofitting capability-bounds-aware
+   branch prediction after the fact, rather than designing it in from the start,
+   was its single largest avoidable real-world performance cost. (A related,
+   separate correction to some existing V8-CVE claims in the Linux-line's own
+   `AGENTIC_AI_SANDBOXING_FIT_ANALYSIS.md`/`REAL_MATH_QUANTITATIVE_COMPARISON.md`
+   docs -- some cited CVEs are JIT-generated-code bugs an ahead-of-time compiler
+   pass cannot reach -- was also found, but belongs to the separate Linux-line
+   repos, out of this document's own scope; not edited from here.)
 
 ---
 

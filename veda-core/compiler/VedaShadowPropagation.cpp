@@ -191,11 +191,13 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
+#include "llvm/Support/Alignment.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -256,10 +258,29 @@ constexpr int64_t kVedaCSRReservedBytes = 104;
 constexpr int64_t kVedaSSCRegionLength = 4096;
 
 // Toolchain Milestone 13: real, on-the-wire capability width
-// (VEDA_CORE_SPEC.md Section 2 -- Tag(1,out-of-band)+128 data bits,
-// OCL.C/OCS.C's own real access width, veda_ocl_insts.sail:130 "16 (bytes)
-// = 128 bits") -- one capability-table slot is exactly this many bytes.
-constexpr uint64_t kVedaCapTableSlotBytes = 16;
+// (VEDA_CORE_SPEC.md Section 2 -- Tag(1,out-of-band)+136 data bits,
+// OCL.C/OCS.C's own real access width, veda_ocl_insts.sail:130 "17 (bytes)
+// = 136 bits") -- one capability-table slot must be at least this many
+// bytes, AND (Toolchain Milestone 21-fix, 2026-08-19 Length/Offset
+// widening) OCL.C/OCS.C now also hard-gate on the target physical address
+// being 32-byte aligned (veda_ocl_insts.sail:136-141,
+// VEDA_CAUSE_ALIGNMENT_VIOLATION -- a real, newly-introduced hardware
+// requirement, not present before the widening). 32 satisfies both: it is
+// >=17 bytes, and every Nth slot at N*32 is 32-byte aligned PROVIDED the
+// table's own base is -- which is not incidental: the table's own
+// GlobalVariable is given an explicit `setAlignment(Align(
+// kVedaCapTableSlotBytes))` below (an [i8 x N] array's LLVM default
+// alignment is 1 byte, which would NOT otherwise guarantee this). This
+// constant was STALE at 16 (the pre-widening capability width) from
+// commit 9de3742 (2026-08-19) until this fix: that commit's own scope was
+// deliberately RTL+Sail-only, and this compiler-pass-side constant was
+// never updated in step, causing every odd-indexed global's table slot to
+// land on a 16-byte-aligned-but-not-32-byte-aligned address -- a real,
+// security-relevant regression (silent OCS.C hard-trap during bootstrap
+// minting for any program with >=2 module-scope tracked globals; found
+// and fixed by direct empirical trace debugging, not assumed correct
+// after the widening landed).
+constexpr uint64_t kVedaCapTableSlotBytes = 32;
 // Real linker-provided symbols (runtime/veda_rt.ld, this milestone's own
 // addition, mirroring the file's existing __bss_start/__bss_end
 // precedent) bounding the two source regions every table-resident
@@ -787,6 +808,12 @@ void VedaShadowPropagation::propagateGlobals(Module &M) {
   auto *CapTableGV = new GlobalVariable(
       M, CapTableArrTy, /*isConstant=*/false, GlobalValue::ExternalLinkage,
       ConstantAggregateZero::get(CapTableArrTy), "g_veda_global_cap_table");
+  // Toolchain Milestone 21-fix: an [i8 x N] array's default LLVM alignment
+  // is 1 byte, which does NOT guarantee slot N's start
+  // (N*kVedaCapTableSlotBytes) lands on the 32-byte-aligned physical
+  // address OCL.C/OCS.C now hard-require post-widening -- explicit, not
+  // incidental on whatever the linker happens to do.
+  CapTableGV->setAlignment(Align(kVedaCapTableSlotBytes));
   (void)CapTableGV;
 
   // A companion i64 constant carrying the table's own real byte size --
@@ -1416,6 +1443,124 @@ void VedaShadowPropagation::propagateInFunction(Function &F) {
 
       if (auto *Call = dyn_cast<CallInst>(&I)) {
         Function *Callee = Call->getCalledFunction();
+        // Toolchain Milestone 21 (NEXT_STEPS_ROADMAP.md's own §2.12): a
+        // plain C struct assignment (`dst = *src;`) or an explicit
+        // memcpy()/memmove() call lowers to this single, opaque intrinsic
+        // call -- every other rule in this pass's dispatch is blind to
+        // it, so a pointer-typed field's own shadow silently fails to
+        // travel with the copied bytes (see
+        // TOOLCHAIN_MILESTONE_21_STRUCT_COPY_SHADOW_DESIGN.md for the
+        // full reasoning and the official SoftBound PLDI 2009 paper's own
+        // Section 5.2 "Memcpy()" precedent this follows). Handled here,
+        // before the general dispatch below, which would otherwise simply
+        // fall through (an intrinsic has no tracked pointer PARAMETERS in
+        // PointerParamIndices/ReturnShadowParamIndex, so it is invisible
+        // to that machinery entirely).
+        if (Callee && Callee->isIntrinsic() &&
+            (Callee->getIntrinsicID() == Intrinsic::memcpy ||
+             Callee->getIntrinsicID() == Intrinsic::memmove)) {
+          Value *Dst = Call->getArgOperand(0);
+          Value *Src = Call->getArgOperand(1);
+          auto *LenC = dyn_cast<ConstantInt>(Call->getArgOperand(2));
+          // Only a compile-time-constant length is handled -- a real,
+          // stated scope limit (design doc's own "explicit, honest scope
+          // limits"), matching this pass's own established convention of
+          // leaving a genuinely out-of-scope shape completely unrewritten
+          // rather than degraded. `sizeof(struct X)` is a compile-time
+          // constant for essentially every real struct-copy call site.
+          if (LenC) {
+            uint64_t Len = LenC->getZExtValue();
+            Value *DstObjShadow = Shadow.lookup(Dst);
+            Value *SrcObjShadow = Shadow.lookup(Src);
+            // The alloca-family (Milestone 12, veda_compartment-protected
+            // stack struct) regime has no per-field synthKey-equivalent
+            // hook to write through -- a real, separately-scoped gap,
+            // named in the design doc rather than silently mishandled
+            // here. Skip entirely if either side is alloca-tracked.
+            bool DstIsAlloca = AllocaBase.count(Dst) != 0;
+            bool SrcIsAlloca = AllocaBase.count(Src) != 0;
+            if (!DstIsAlloca && !SrcIsAlloca) {
+              // Toolchain Milestone 21-fix (found empirically via a real
+              // sail_riscv_sim trace on veda_demo_struct_copy.c, not
+              // assumed): a Shadow-tracked object's real field VALUES live
+              // exclusively in the OCL.D/OCS.D-addressed arena -- Milestone
+              // 9's own dereference codegen rewrites EVERY ordinary
+              // load/store touching such an object into a
+              // veda_rt_ocl_d/veda_rt_ocs_d call, so nothing is ever really
+              // written at the object's own compile-time fake-offset-token
+              // address (every fresh veda_malloc_raw call returns the SAME
+              // fixed kVedaNullBase pointer value -- see file header). The
+              // underlying llvm.memcpy this block sits beside therefore
+              // only moves REAL bytes correctly when NEITHER side is
+              // tracked; for a tracked side, the bytes it moves through the
+              // fake address are just whatever happens to be at that fixed
+              // low address in real physical memory -- unrelated garbage,
+              // empirically confirmed to read back as 0. The original
+              // version of this fix copied only the shadow (Object_ID)
+              // metadata and trusted llvm.memcpy for the real value --
+              // correct for the ordinary-to-ordinary case, silently wrong
+              // whenever either side is tracked (a copied pointer field
+              // read back with the RIGHT shadow but the WRONG underlying
+              // address, producing a spurious VEDA_CAUSE_BOUNDS_VIOLATION
+              // rather than a silent gap). Fixed by moving the real VALUE
+              // through OclFn/OcsFn (the same real hardware primitives
+              // every ordinary tracked load/store already uses) for every
+              // slot where either side is tracked, not just the shadow --
+              // and by inserting after the memcpy call (not before), so an
+              // ordinary destination's authoritative write here is not
+              // clobbered by the memcpy's own subsequent (possibly
+              // garbage-source) byte copy.
+              IRBuilder<> B(Call->getNextNode());
+              Value *DstBase =
+                  DstObjShadow ? computeOffset(B, Dst) : nullptr;
+              Value *SrcBase =
+                  SrcObjShadow ? computeOffset(B, Src) : nullptr;
+              // Walk every 8-byte-aligned slot in the known-constant
+              // length range and unconditionally move both the real value
+              // and whatever shadow (real or the default "no shadow"
+              // sentinel) lives there -- no struct-type recovery needed at
+              // all, matching SoftBound's own paper: a slot that was never
+              // really a pointer field just round-trips a harmless default
+              // shadow value alongside its own real (non-pointer) bytes.
+              for (uint64_t K = 0; K + 8 <= Len; K += 8) {
+                Value *RawVal;
+                Value *SrcSlotShadow;
+                if (SrcObjShadow) {
+                  Value *SrcOff =
+                      B.CreateAdd(SrcBase, ConstantInt::get(I64Ty, K));
+                  if (!ScratchSlot) {
+                    IRBuilder<> EntryB(
+                        &*F.getEntryBlock().getFirstInsertionPt());
+                    ScratchSlot = EntryB.CreateAlloca(I64Ty, nullptr,
+                                                       "veda.ocl.scratch");
+                  }
+                  B.CreateCall(OclFn, {SrcObjShadow, SrcOff, ScratchSlot});
+                  RawVal = B.CreateLoad(I64Ty, ScratchSlot);
+                  Value *SrcKey = synthKey(B, SrcObjShadow, SrcOff);
+                  SrcSlotShadow = B.CreateCall(ShadowLoadFn, {SrcKey});
+                } else {
+                  Value *SrcAddr =
+                      B.CreateConstGEP1_64(Type::getInt8Ty(*Ctx), Src, K);
+                  RawVal = B.CreateLoad(I64Ty, SrcAddr);
+                  SrcSlotShadow = B.CreateCall(ShadowLoadFn, {SrcAddr});
+                }
+                if (DstObjShadow) {
+                  Value *DstOff =
+                      B.CreateAdd(DstBase, ConstantInt::get(I64Ty, K));
+                  B.CreateCall(OcsFn, {DstObjShadow, DstOff, RawVal});
+                  Value *DstKey = synthKey(B, DstObjShadow, DstOff);
+                  B.CreateCall(ShadowStoreFn, {DstKey, SrcSlotShadow});
+                } else {
+                  Value *DstAddr =
+                      B.CreateConstGEP1_64(Type::getInt8Ty(*Ctx), Dst, K);
+                  B.CreateStore(RawVal, DstAddr);
+                  B.CreateCall(ShadowStoreFn, {DstAddr, SrcSlotShadow});
+                }
+              }
+            }
+          }
+          continue;
+        }
         if (Callee && Callee->getName() == kMallocRawName) {
           // Recognize the malloc-source pattern:
           //   %p = call ptr @veda_malloc_raw(i64 %size, ptr %oid_slot)

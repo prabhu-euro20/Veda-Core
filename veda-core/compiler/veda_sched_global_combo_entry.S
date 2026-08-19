@@ -24,7 +24,9 @@
 # collision-free past every existing .S file's own highest use (430,
 # veda_global_protect_entry.S).
 #   431 = g_combo_data region (Load|Store, Length=0x10 -- 2 dwords)
-#   432 = g_combo_table region (Load|Store, Length=0x10 -- 1 capability slot)
+#   432 = g_combo_table region (Load|Store, Length=0x20 -- 1 capability slot,
+#         grown from 0x10 post-2026-08-19-widening -- see Toolchain
+#         Milestone 21-fix comment below)
 # c0 used as pure transient scratch for the DATA_REGION bind -- safe here
 # since this runs before veda_scheduler_start's own ceremony claims any
 # CRF register and before any OCInvoke, the same "nothing claimed yet"
@@ -46,9 +48,16 @@ veda_sched_global_combo_boot:
     .insn i 0x0b, 0x5, x0, a0, 0          # veda.bind c0, a0
 
     # ---- g_combo_table region -> c11 (PERSISTENT), Object_ID 432 ----
+    # Toolchain Milestone 21-fix (2026-08-19 Length/Offset widening):
+    # Length 0x10(16)->0x20(32) and the object's own alignment (below,
+    # `.align 4`->`.align 5`) -- the capability slot at offset 0 now needs
+    # 17 bytes (post-widening OCL.C/OCS.C width) on a 32-byte-aligned
+    # physical address, not the pre-widening 16 bytes/16-byte alignment.
+    # Real VEDA_CAUSE_BOUNDS_VIOLATION confirmed via sail_riscv_sim trace
+    # before this fix (offset(0)+width(17)=17 > old Length(16)).
     la   t0, g_combo_table
     slli t0, t0, 32
-    li   t1, 0x0010000C   # Length=0x10, Perms=Load|Store
+    li   t1, 0x0020000C   # Length=0x20, Perms=Load|Store
     or   t0, t0, t1
     li   a0, 432
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
@@ -69,7 +78,9 @@ veda_sched_global_combo_boot:
 g_combo_data:
     .dword 0   # offset 0: thread 0's own slot
     .dword 0   # offset 8: thread 1's own slot
-.align 4
+.align 5
 g_combo_table:
-    .dword 0   # capability slot (16 bytes)
-    .dword 0
+    .dword 0   # capability slot (17 bytes post-widening; low 8B)
+    .dword 0   # capability slot (mid 8B)
+    .dword 0   # capability slot (high 1B) + 7B unused
+    .dword 0   # trailing padding to a clean 32B object

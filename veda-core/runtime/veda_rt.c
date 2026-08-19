@@ -121,24 +121,26 @@ bool veda_ocs_d(veda_obj_t obj, uint64_t offset, uint64_t value) {
 
 // Toolchain Milestone 15: the in-memory capability table itself -- now
 // emitted directly by VedaShadowPropagation.cpp's own Phase B1, exactly
-// sized to the real program's own global count (Rows.size() * 16 bytes),
-// the fix TOOLCHAIN_MILESTONE_13_DESIGN.md's own "concrete next design
-// step" already named ("exactly as many slots as the tuple table has
-// entries, sized by the compiler pass itself"). This WEAK definition is
-// only the fallback default for a program that references the symbol
-// (an M13/M15-style hand-written entry point's own `la`) without the
-// pass having found any qualifying global -- real, strong-linkage
-// emission from the pass always wins when present, the identical
-// real C/ELF weak-symbol mechanism __veda_global_table_meta/_count
-// already rely on below. One slot (16 bytes), matching those two
-// symbols' own minimal, harmless defaults.
-__attribute__((weak)) uint8_t g_veda_global_cap_table[16];
+// sized to the real program's own global count (Rows.size() * 32 bytes,
+// kVedaCapTableSlotBytes -- grown from 16 post-2026-08-19-widening, see
+// veda_rt_init_globals's own identical fix above), the fix
+// TOOLCHAIN_MILESTONE_13_DESIGN.md's own "concrete next design step"
+// already named ("exactly as many slots as the tuple table has entries,
+// sized by the compiler pass itself"). This WEAK definition is only the
+// fallback default for a program that references the symbol (an
+// M13/M15-style hand-written entry point's own `la`) without the pass
+// having found any qualifying global -- real, strong-linkage emission
+// from the pass always wins when present, the identical real C/ELF
+// weak-symbol mechanism __veda_global_table_meta/_count already rely on
+// below. One slot (32 bytes), matching those two symbols' own minimal,
+// harmless defaults.
+__attribute__((weak)) uint8_t g_veda_global_cap_table[32];
 // Companion byte-size constant for the same weak-fallback scenario --
 // the hand-written entry point's own ODT-Populate Length field reads
 // this directly (veda_global_protect_entry.S), mirroring
 // __veda_global_table_count's own role for veda_rt_init_globals's loop
 // bound above.
-__attribute__((weak)) const uint64_t __veda_global_cap_table_bytes = 16;
+__attribute__((weak)) const uint64_t __veda_global_cap_table_bytes = 32;
 
 // Toolchain Milestone 12: no software bind-failure path exists here --
 // c15 is already established by the compartment's own entry point (never
@@ -224,7 +226,14 @@ __attribute__((weak)) const uint64_t __veda_global_table_count = 0;
 void veda_rt_init_globals(void) {
   for (uint64_t i = 0; i < __veda_global_table_count; i++) {
     const struct veda_global_table_entry *e = &__veda_global_table_meta[i];
-    uint64_t table_slot_offset = i * 16; // kVedaCapTableSlotBytes, mirrored
+    // Toolchain Milestone 21-fix (2026-08-19 Length/Offset widening): this
+    // hand-mirrored stride went stale at 16 (the pre-widening constant)
+    // when VedaShadowPropagation.cpp's own kVedaCapTableSlotBytes grew to
+    // 32 (17-byte OCL.C/OCS.C width + new 32-byte alignment gate) --
+    // found via a real sail_riscv_sim trace (VEDA_CAUSE_ALIGNMENT_VIOLATION
+    // on c11 during bootstrap minting), not assumed fixed by the
+    // compiler-side constant alone.
+    uint64_t table_slot_offset = i * 32; // kVedaCapTableSlotBytes, mirrored
     if (e->region_selector == 0)
       veda_mint_global_cap_rodata_asm(e->region_offset, e->size,
                                       table_slot_offset);

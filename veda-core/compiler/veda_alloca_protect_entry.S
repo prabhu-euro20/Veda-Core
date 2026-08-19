@@ -104,13 +104,21 @@ landing_pad:
     li   x24, 1
 
 do_exit:
+    # Toolchain Milestone 21-fix (2026-08-19 Length/Offset widening,
+    # commit 9de3742, moved VEDA_PCC_UNBOUNDED from 16-bit 0xFFFF to
+    # 20-bit 0xFFFFF): plain VEDA_ODT_POPULATE's Length field stays
+    # permanently 16-bit-capped by design and can never represent the new
+    # sentinel, so this exit-CODE object must use VEDA_ODT_POPULATE_FAST +
+    # veda_attr instead, mirroring vc_ocinvoke.S's own already-fixed
+    # pattern -- otherwise the exit OCInvoke installs a still-"bounded"
+    # (Length=0xFFFF != 0xFFFFF) PCC and the plain RVMODEL_HALT_PASS `sw`
+    # right after it hard-traps under Milestone 19's purecap enforcement.
+    li   t1, 0xFFFFF0402   # veda_attr: Length=0xFFFFF (unbounded), Perms=Execute|Invoke
+    csrw 0x7c4, t1
     la   t0, exit_point
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402   # Length=0xFFFF (unbounded), Perms=Execute|Invoke
-    or   t0, t0, t1
     li   x1, 420
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- exit CODE
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2 -- exit CODE
 
     li   x1, 421
     li   x2, 0x8001090000400400

@@ -155,6 +155,16 @@ run_one veda_demo_union_punning /tmp/demo_crt0.o /tmp/demo_union_punning.o /tmp/
   || { echo "veda_demo_rcu_pattern.c failed"; exit 1; }
 run_one veda_demo_rcu_pattern /tmp/demo_crt0.o /tmp/demo_rcu_pattern.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
 
+# Positive: Toolchain Milestone 21 (NEXT_STEPS_ROADMAP.md's own §2.12) --
+# a plain C struct assignment (`dst = *src;`) lowers to an opaque
+# @llvm.memcpy the pass's per-instruction dispatch is otherwise blind to.
+# See TOOLCHAIN_MILESTONE_21_STRUCT_COPY_SHADOW_DESIGN.md for the full
+# design and TOOLCHAIN_MILESTONE_20_KERNEL_GAPS_RESULTS.md for the
+# original empirical discovery of the gap.
+"$CLANG" $CC_FLAGS -fpass-plugin="$PLUGIN" -c -o /tmp/demo_struct_copy.o veda_demo_struct_copy.c \
+  || { echo "veda_demo_struct_copy.c failed"; exit 1; }
+run_one veda_demo_struct_copy /tmp/demo_crt0.o /tmp/demo_struct_copy.o /tmp/demo_veda_compiler_rt.o /tmp/demo_veda_rt.o /tmp/demo_veda_rt_asm.o
+
 echo "=== Toolchain Milestone 9 (real end-to-end demo) test results ==="
 for r in "${results[@]}"; do echo "$r"; done
 echo "---"

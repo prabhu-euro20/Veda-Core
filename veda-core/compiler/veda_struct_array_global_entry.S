@@ -139,13 +139,16 @@ landing_pad:
     li   x24, 1
 
 do_exit:
+    # Toolchain Milestone 21-fix -- see veda_alloca_protect_entry.S's
+    # identical fix for the full reasoning (Length/Offset widening moved
+    # VEDA_PCC_UNBOUNDED from 0xFFFF to 0xFFFFF; plain populate cannot
+    # represent it, so populate.fast + veda_attr is required here).
+    li   t1, 0xFFFFF0402   # veda_attr: Length=0xFFFFF (unbounded), Perms=Execute|Invoke
+    csrw 0x7c4, t1
     la   t0, exit_point
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402   # Length=0xFFFF (unbounded), Perms=Execute|Invoke
-    or   t0, t0, t1
     li   x1, 444
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2 -- exit CODE
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2 -- exit CODE
 
     li   x1, 445
     li   x2, 0x8001090000400400

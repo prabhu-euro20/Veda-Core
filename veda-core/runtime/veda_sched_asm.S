@@ -89,13 +89,21 @@ veda_sched_init_asm:
     .insn r 0x5b, 0x1, 0x10, x5, x5, x13  # cseal c5, c5, c13  -- sealed DATA_SCHED
 
     # ---- save-area-0: Object_ID 165, Load|Store, permanent bind c6 ----
-    # Length=0x0030 (48): 24B PC/base/length (unchanged) + 8B padding to a
-    # 16B boundary + 16B table-base-capability slot (CRF-exhaustion fix,
-    # TOOLCHAIN_MILESTONE_13_CRF_EXHAUSTION_DECISION.md +
-    # TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md).
+    # Length=0x0040 (64): 24B PC/base/length (unchanged) + 8B padding to a
+    # 32B boundary + 17B table-base-capability slot (post-widening,
+    # 2026-08-19) + 7B trailing padding to a clean 64B object (CRF
+    # -exhaustion fix, TOOLCHAIN_MILESTONE_13_CRF_EXHAUSTION_DECISION.md +
+    # TOOLCHAIN_MILESTONE_14_CRF_SPILL_RESULTS.md). Toolchain Milestone
+    # 21-fix: was Length=0x0030 (48)/16B-aligned slot, sized for the
+    # pre-widening 16-byte OCS.C/OCL.C width -- offset(32)+width(17)=49 >
+    # 48 overflowed the object by 1 byte (real VEDA_CAUSE_BOUNDS_VIOLATION,
+    # confirmed via sail_riscv_sim trace). Grown to 64B and the capability
+    # slot's own physical alignment requirement raised from 16B to 32B
+    # (this file's own `.align 4`->`.align 5` on save_area_0 below) to
+    # satisfy OCL.C/OCS.C's new post-widening 32-byte alignment gate.
     la   t0, save_area_0
     slli t0, t0, 32
-    li   t1, 0x0030000C
+    li   t1, 0x0040000C
     or   t0, t0, t1
     li   a0, 165
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
@@ -103,9 +111,11 @@ veda_sched_init_asm:
     .insn i 0x0b, 0x5, x6, a0, 0   # veda.bind c6, a0
 
     # ---- save-area-1: Object_ID 166, Load|Store, permanent bind c7 ----
+    # Toolchain Milestone 21-fix -- identical reasoning as save_area_0
+    # above (Length 0x0030->0x0040, capability slot now 32B-aligned).
     la   t0, save_area_1
     slli t0, t0, 32
-    li   t1, 0x0030000C
+    li   t1, 0x0040000C
     or   t0, t0, t1
     li   a0, 166
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
@@ -122,13 +132,25 @@ veda_sched_init_asm:
     li   a0, 167
     .insn i 0x0b, 0x5, x8, a0, 0   # veda.bind c8, a0
 
-    # ---- return-sentry SOURCE: Object_ID 168, Length=0xFFFF(unbounded), Execute ----
+    # ---- return-sentry SOURCE: Object_ID 168, Length=0xFFFFF(unbounded), Execute ----
+    # Toolchain Milestone 21-fix (2026-08-19 Length/Offset widening,
+    # commit 9de3742, moved VEDA_PCC_UNBOUNDED from 16-bit 0xFFFF to
+    # 20-bit 0xFFFFF): this sentry is later consumed via OCRETURN
+    # (`ocreturn c10` below), which narrows veda_pcc_length = cs1.Length
+    # exactly like OCInvoke does -- so a still-16-bit Length=0xFFFF here
+    # is a real, latent instance of the identical bug
+    # veda_alloca_protect_entry.S's own exit ceremony had, not yet
+    # observed only because an earlier, unrelated bounds violation
+    # (this same file's save-area capability-slot pre-population,
+    # see TOOLCHAIN_MILESTONE_21_TOOLCHAIN_WIDENING_PARITY_RESULTS.md)
+    # traps first. Plain VEDA_ODT_POPULATE's Length field stays
+    # permanently 16-bit-capped by design, so this must use
+    # VEDA_ODT_POPULATE_FAST + veda_attr instead.
+    li   t1, 0xFFFFF0002   # veda_attr: Length=0xFFFFF (unbounded), Perms=Execute
+    csrw 0x7c4, t1
     la   t0, after_scheduler_return
-    slli t0, t0, 32
-    li   t1, 0xFFFF0002
-    or   t0, t0, t1
     li   a0, 168
-    .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0,t0
+    .insn r 0x0b, 0x0, 0x04, x5, a0, t0   # veda.odt.populate.fast x5, a0, t0
     li   a0, 168
     .insn i 0x0b, 0x5, x9, a0, 0   # veda.bind c9, a0
 
@@ -380,21 +402,31 @@ do_resume:
     # scalar state, not on this hot spill path, and already lived in
     # ordinary .data.
 .section .data
-.align 4
+# Toolchain Milestone 21-fix (2026-08-19 Length/Offset widening):
+# `.align 4` (16B) -> `.align 5` (32B) so the capability slot at offset 32
+# below lands on a genuinely 32-byte-aligned physical address, satisfying
+# OCL.C/OCS.C's new post-widening alignment gate (real hardware/Sail
+# requirement, not just hygiene, unlike the pre-widening 16B comment this
+# replaces).
+.align 5
 save_area_0:
     .dword 0
     .dword 0
     .dword 0
-    .dword 0   # offset 24-31: padding to the 16-byte-aligned capability slot
+    .dword 0   # offset 24-31: padding to the 32-byte-aligned capability slot
     .dword 0   # offset 32-39: globals table-base capability (low 8B)
-    .dword 0   # offset 40-47: globals table-base capability (high 8B)
+    .dword 0   # offset 40-47: globals table-base capability (mid 8B)
+    .dword 0   # offset 48-55: globals table-base capability (high 1B + 7B unused)
+    .dword 0   # offset 56-63: trailing padding to a clean 64B object
 save_area_1:
     .dword 0
     .dword 0
     .dword 0
     .dword 0   # offset 24-31: padding
     .dword 0   # offset 32-39: globals table-base capability (low 8B)
-    .dword 0   # offset 40-47: globals table-base capability (high 8B)
+    .dword 0   # offset 40-47: globals table-base capability (mid 8B)
+    .dword 0   # offset 48-55: globals table-base capability (high 1B + 7B unused)
+    .dword 0   # offset 56-63: trailing padding to a clean 64B object
 
 .section .data
 .align 3

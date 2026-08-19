@@ -89,6 +89,17 @@ All three reverted cleanly; final full regression re-confirmed at **70/70**.
 
 **RTL mirror** -- deliberately not attempted this pass, matching this project's established Sail-first sequencing. `rtl/veda_core.tlv` still has the old 128-bit/16-byte capability format throughout: CRF field declarations, `$veda_ocsc_packed`'s own pack/unpack, OCL.C/OCS.C's byte-move logic, `tag_mem`/`tcm_scratch_tag` array sizing, the ODT entry format, every zero-extension literal-width site, and the `16'hFFFF` sentinel family (~15 sites, per the prior day's audit) -- none of this pass's changes have been mirrored there yet. The RTL milestone also owes its own **fresh Yosys synthesis check at the real 20-bit width** (the prior day's 540-vs-75-cell numbers were measured on synthetic mockups at the *pre-this-pass* field widths, for comparing tag-granule strategies in the abstract, not the real widened RTL) and a **re-verification of `REALTIME_SAFETY_CRITICAL_AUDIT_RESULTS.md`'s "exactly one hold mechanism" claim** against the actual changed RTL, per that same audit's own explicit caveat -- not assumed to still hold.
 
-**Toolchain layer** -- `veda_rt.h`'s `veda_rt_init(uint16_t length, uint16_t perms)` signature, `VedaShadowPropagation.cpp`'s `kVedaCapTableSlotBytes = 16` constant: named as real touch points by the prior day's audit, not yet updated. The 9 hand-written `.S` bootstrap files using `slli ..., 16` to pack plain-`VEDA_ODT_POPULATE` descriptors are confirmed to need **zero** changes (plain POPULATE's own encoding stays unchanged by design).
+**Toolchain layer** -- `VedaShadowPropagation.cpp`'s `kVedaCapTableSlotBytes = 16`
+constant, plus 3 more real, related toolchain-layer regressions this doc's own
+scope did not originally anticipate (a stale `0xFFFF`-vs-`0xFFFFF` PCC-unbounded
+sentinel across 6 hand-written `.S` files, a second hand-mirrored copy of the
+`kVedaCapTableSlotBytes` constant in `runtime/veda_rt.c`, and two hand-sized
+scheduler-object Length constants) -- all found by a full regression sweep and
+**closed in TOOLCHAIN_MILESTONE_22_WIDENING_PARITY_RESULTS.md**, see that doc for
+the full detail. `veda_rt.h`'s `veda_rt_init(uint16_t length, uint16_t perms)`
+signature remains unaudited/not yet revisited. The 9 hand-written `.S` bootstrap
+files using `slli ..., 16` to pack plain-`VEDA_ODT_POPULATE` descriptors are
+confirmed to need **zero** changes (plain POPULATE's own encoding stays unchanged
+by design).
 
 **Not committed or pushed yet**, matching this session's established pattern.
