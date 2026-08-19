@@ -777,6 +777,20 @@
          // $csr_is_veda_* address already decoded above before adopting
          // it.
          $csr_is_veda_mode         = ($csr_addr == 12'h7C5);
+         // TRAP_QUARANTINE_DESIGN.md / RTL mirror (task #351): the next
+         // free slot after Milestone 19's 0x7C5, confirmed collision-free
+         // against every $csr_is_veda_* address already decoded above
+         // before adopting it -- the identical convention every prior
+         // custom-CSR addition here already followed, matching the
+         // already-verified Sail-side choice (veda_regs.sail's own
+         // write_CSR(0x7C6,...) clause). Write-only (privileged clear of
+         // one veda_trap_tracker entry, see that table's own definition
+         // below) -- deliberately never added to $csr_rdata's own mux,
+         // so a read hits the pre-existing "any other address reads as a
+         // hardwired 0" default, matching the Sail side's own real,
+         // standard WARL-unimplemented-field convention for a CSR this
+         // core chooses not to make readable.
+         $csr_is_veda_trap_quarantine_clear = ($csr_addr == 12'h7C6);
 
          // MRET: the one, fixed 32-bit encoding (funct12=0b001100000010,
          // rs1=rd=0, funct3=0, opcode=SYSTEM) -- matched as a single
@@ -2240,12 +2254,42 @@
          //  veda_trap(rs1 or rs2, ...) choice.
          // ─────────────────────────────────────────────────────────
          $is_veda_ocinvoke = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010010);
+         // ─────────────────────────────────────────────────────────
+         //  TRAP_QUARANTINE_DESIGN.md / RTL mirror (task #351): the real,
+         //  additive check this milestone adds -- checked LAST, after
+         //  every real CHERI-precedented check below already holds,
+         //  exactly matching veda_cap_insts.sail's own VEDA_OCINVOKE
+         //  ordering ("checked last, after every real CHERI-precedented
+         //  check above already holds"). Looked up against
+         //  $veda_rs1cap_otype (cs1, the compartment being ENTERED) --
+         //  Sail's own veda_trap_tracker_is_quarantined(cs1.otype), not
+         //  cs2. $veda_tt0..7_valid/_otype/_count (the 8-entry tracker
+         //  table, defined further below alongside $veda_pcc_otype -- the
+         //  same combinational-elaboration-is-order-independent forward
+         //  reference already used throughout this file, e.g.
+         //  $veda_trap_taken referencing per-family violation signals
+         //  defined later) hold the tracker's own current, already-
+         //  committed state as of this cycle -- the identical bare
+         //  (non->>1) read $veda_pcc_violation already uses against
+         //  $veda_pcc_length, since both read "the live state, right now"
+         //  rather than a decode-time-triggered update.
+         // ─────────────────────────────────────────────────────────
+         $veda_ocinvoke_quarantined =
+            ($veda_tt0_valid && ($veda_tt0_otype == $veda_rs1cap_otype) && ($veda_tt0_count >= 4'd3)) ||
+            ($veda_tt1_valid && ($veda_tt1_otype == $veda_rs1cap_otype) && ($veda_tt1_count >= 4'd3)) ||
+            ($veda_tt2_valid && ($veda_tt2_otype == $veda_rs1cap_otype) && ($veda_tt2_count >= 4'd3)) ||
+            ($veda_tt3_valid && ($veda_tt3_otype == $veda_rs1cap_otype) && ($veda_tt3_count >= 4'd3)) ||
+            ($veda_tt4_valid && ($veda_tt4_otype == $veda_rs1cap_otype) && ($veda_tt4_count >= 4'd3)) ||
+            ($veda_tt5_valid && ($veda_tt5_otype == $veda_rs1cap_otype) && ($veda_tt5_count >= 4'd3)) ||
+            ($veda_tt6_valid && ($veda_tt6_otype == $veda_rs1cap_otype) && ($veda_tt6_count >= 4'd3)) ||
+            ($veda_tt7_valid && ($veda_tt7_otype == $veda_rs1cap_otype) && ($veda_tt7_count >= 4'd3));
          $veda_ocinvoke_violation = $is_veda_ocinvoke && (
             !$veda_rs1cap_tag || !$veda_cs2_tag ||
             !$veda_sealed || !$veda_cs2_sealed ||
             ($veda_rs1cap_otype != $veda_cs2_otype) ||
             !$veda_rs1cap_perms[10] || !$veda_cs2_perms[10] ||
-            !$veda_rs1cap_perms[1] || $veda_cs2_perms[1]);
+            !$veda_rs1cap_perms[1] || $veda_cs2_perms[1] ||
+            $veda_ocinvoke_quarantined);
          $veda_ocinvoke_cause[4:0] =
             !$veda_rs1cap_tag           ? 5'h02 :
             !$veda_cs2_tag              ? 5'h02 :
@@ -2255,7 +2299,8 @@
             !$veda_rs1cap_perms[10]     ? 5'h19 :
             !$veda_cs2_perms[10]        ? 5'h19 :
             !$veda_rs1cap_perms[1]      ? 5'h11 :
-                                           5'h11; // remaining case: cs2 wrongly executable
+            $veda_cs2_perms[1]          ? 5'h11 : // cs2 wrongly executable
+                                           5'h09; // remaining case: VEDA_CAUSE_COMPARTMENT_QUARANTINED
          $veda_ocinvoke_cap_idx[3:0] =
             !$veda_rs1cap_tag           ? $veda_ocl_ocs_rs1_cap :
             !$veda_cs2_tag              ? $veda_cseal_cunseal_rs2_cap :
@@ -2265,7 +2310,8 @@
             !$veda_rs1cap_perms[10]     ? $veda_ocl_ocs_rs1_cap :
             !$veda_cs2_perms[10]        ? $veda_cseal_cunseal_rs2_cap :
             !$veda_rs1cap_perms[1]      ? $veda_ocl_ocs_rs1_cap :
-                                           $veda_cseal_cunseal_rs2_cap;
+            $veda_cs2_perms[1]          ? $veda_cseal_cunseal_rs2_cap :
+                                           $veda_ocl_ocs_rs1_cap; // quarantined: report cs1 (the register the tracker keyed on)
          // Real jump target: cs1.Base + cs1.Offset (the same real
          // CGetAddr semantics already established) -- CHERI's own real
          // "clear bit 0 as for RISCV JALR" is a no-op here, since
@@ -2411,6 +2457,99 @@
             ($veda_rs1cap_otype != 16'hFFFE)     ? 5'h03 :
                                                     5'h11; // remaining case: cs1 not executable
          $veda_ocreturn_target[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
+
+         // ─────────────────────────────────────────────────────────
+         //  LOCAL_FAULT_RECOVERY_DESIGN.md / RTL mirror: VEDA_SET_LOCAL_
+         //  HANDLER (assembly "osethandler cs1") -- self-registration-
+         //  only instruction. Registers cs1's own Base+Offset as the
+         //  CURRENT live compartment's own local-handler entry point,
+         //  keyed by $veda_pcc_otype -- no operand names a target otype
+         //  at all, the deliberate confused-deputy guard (a compartment
+         //  can only ever register a handler for ITSELF).
+         //
+         //  funct7 = 0010111, the next free Custom-2/funct3=001 slot
+         //  after OCRETURN's own 0010110 above (verified by grep against
+         //  every existing user of this space before picking it). Single
+         //  source capability operand, reusing the same shared rs1-cap
+         //  field every other Custom-2 instruction already shares -- no
+         //  new field extraction needed, no destination (rs2/rd both
+         //  hardwired to zero on the Sail side, matching OCRETURN's own
+         //  no-output shape).
+         //
+         //  Check order mirrors veda_cap_insts.sail's own
+         //  VEDA_SET_LOCAL_HANDLER exactly: Tag(cs1) -> live-compartment
+         //  (PCC not unbounded) -> Permit_Execute(cs1) -> confused-deputy
+         //  bounds check (target must lie within the CURRENT compartment's
+         //  own [pcc_base, pcc_base+pcc_length)) -> table-full (no
+         //  existing entry for this otype AND no free slot). Cause codes:
+         //  tag=0x02 and perm-execute=0x11 reuse this file's own existing
+         //  values; VEDA_CAUSE_NO_LIVE_COMPARTMENT=0x0a and
+         //  VEDA_CAUSE_HANDLER_TABLE_FULL=0x0b are freshly confirmed-free
+         //  slots (grep-audited against every 5'h0*/5'h1* literal in this
+         //  file before picking them, matching Sail's own two new cause
+         //  codes bit-for-bit); the bounds-violation case reuses the
+         //  EXISTING VEDA_CAUSE_BOUNDS_VIOLATION=0x01 exactly as Sail
+         //  does (no new cause code for the confused-deputy guard --
+         //  it's the same real bounds-violation family every other
+         //  bounds check in this file already reports).
+         //
+         //  No new arm needed in $veda_trap_cap_idx below -- its own
+         //  existing default fallback is already $veda_ocl_ocs_rs1_cap,
+         //  exactly the single operand this instruction has (identical
+         //  reasoning to OCRETURN's own comment above).
+         // ─────────────────────────────────────────────────────────
+         $is_veda_osethandler = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010111);
+         $veda_osethandler_target[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
+         // Confused-deputy bounds check, mirroring $veda_pcc_violation's
+         // own real bounds arithmetic exactly (32-bit address space,
+         // Length zero-extended from 20 to 32 bits) -- verified against
+         // that check's own source before writing this, not assumed.
+         $veda_osethandler_in_bounds = ($veda_osethandler_target[31:0] >= $veda_pcc_base) &&
+                                        ($veda_osethandler_target[31:0] < ($veda_pcc_base + {12'b0, $veda_pcc_length}));
+         // Table-full check: is there ALREADY an entry for the CURRENT
+         // live compartment's own otype (an overwrite-in-place, always
+         // allowed), or failing that, is there a free slot to allocate
+         // (also always allowed)? Only refuse when neither holds.
+         // $veda_lh_registered/$veda_lh_reg_any_inv are defined further
+         // below alongside the local_handler_table itself (combinational-
+         // elaboration-is-order-independent, the same forward-reference
+         // idiom this file already uses throughout, e.g. $veda_trap_taken
+         // referencing per-family violation signals defined later).
+         $veda_lh_table_full = !$veda_lh_registered && !$veda_lh_reg_any_inv;
+         // Real bug found by adversarial review of this same RTL mirror
+         // (present identically on the Sail side, fixed there the same
+         // way -- see veda_cap_insts.sail's own VEDA_SET_LOCAL_HANDLER
+         // comment for the full explanation): PCC can be genuinely
+         // bounded (a live compartment's real Base/Length, correctly
+         // restored) while $veda_pcc_otype STILL holds the shared
+         // UNSEALED_OTYPE sentinel (16'hFFFF) -- this is the ORDINARY
+         // state after every trap+mret round trip that never goes
+         // through OCInvoke again ($veda_pcc_otype's own mux has no
+         // is_mret arm, by design) and after every successful VEDA_
+         // OCRETURN (which explicitly sets otype to 16'hFFFF, line ~3244
+         // below, since a return target has no per-destination identity).
+         // Without this check, two UNRELATED compartments both resumed
+         // into this ordinary window would collide on the SAME shared
+         // table key -- confirmed reachable by this project's own shipped
+         // veda_sched_asm.S scheduler threads, entered exclusively via
+         // OCReturn and therefore running under this exact shared
+         // identity the entire time. UNSEALED_OTYPE is a shared sentinel,
+         // never a genuine per-compartment identity, so it must never be
+         // an eligible registration key.
+         $veda_osethandler_violation = $is_veda_osethandler && (
+            !$veda_rs1cap_tag ||
+            ($veda_pcc_length == 20'hFFFFF) ||
+            ($veda_pcc_otype == 16'hFFFF) ||
+            !$veda_rs1cap_perms[1] ||
+            !$veda_osethandler_in_bounds ||
+            $veda_lh_table_full);
+         $veda_osethandler_cause[4:0] =
+            !$veda_rs1cap_tag                  ? 5'h02 :
+            ($veda_pcc_length == 20'hFFFFF)    ? 5'h0a : // VEDA_CAUSE_NO_LIVE_COMPARTMENT
+            ($veda_pcc_otype == 16'hFFFF)      ? 5'h0a : // VEDA_CAUSE_NO_LIVE_COMPARTMENT (no live identity)
+            !$veda_rs1cap_perms[1]             ? 5'h11 :
+            !$veda_osethandler_in_bounds       ? 5'h01 : // VEDA_CAUSE_BOUNDS_VIOLATION (existing)
+                                                  5'h0b;  // VEDA_CAUSE_HANDLER_TABLE_FULL
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 11: OSpecialRW + capability-authority-gated
@@ -2794,6 +2933,7 @@
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
                              $veda_ocjalr_violation || $veda_ocreturn_violation ||
+                             $veda_osethandler_violation ||
                              $veda_bind_trap || $veda_pcc_violation ||
                              $veda_purecap_violation || $veda_csr_escape_violation ||
                              $is_ecall;
@@ -2817,6 +2957,7 @@
             $veda_ocinvoke_violation  ? $veda_ocinvoke_cause :
             $veda_ocjalr_violation    ? $veda_ocjalr_cause :
             $veda_ocreturn_violation  ? $veda_ocreturn_cause :
+            $veda_osethandler_violation ? $veda_osethandler_cause :
             $veda_bind_trap           ? $veda_bind_cause :
                                         5'b0;
          $veda_trap_cap_idx[3:0] = $veda_ocinvoke_violation ? $veda_ocinvoke_cap_idx :
@@ -2880,10 +3021,20 @@
          // the real comment at $mtvec's own update logic below for the full
          // reasoning. Reuses 100% of the already-wired mcause=0x02/
          // mtval=raw-instr/veda_trap_taken machinery for free.
+         // TRAP_QUARANTINE_DESIGN.md / RTL mirror: veda_trap_quarantine_clear
+         // (0x7C6) joins this same OR-list -- matches the Sail side's own
+         // write_CSR(0x7C6,...) exactly (its first line is the identical
+         // "if veda_pcc_length != VEDA_PCC_UNBOUNDED then { veda_pcc_save_
+         // and_reset(); Err(()) }" guard 0x7C0-0x7C3/0x7C5 already share):
+         // code inside a live compartment must not be able to clear its
+         // own quarantine record out from under this mechanism, the same
+         // real self-escape vector every other compartment-state CSR here
+         // is already closed against.
          $veda_csr_escape_violation = $csr_write_en &&
             ($csr_is_veda_pcc_base || $csr_is_veda_pcc_length ||
              $csr_is_veda_mepcc_base || $csr_is_veda_mepcc_length ||
-             $csr_is_veda_mode || $csr_is_mtvec) &&
+             $csr_is_veda_mode || $csr_is_mtvec ||
+             $csr_is_veda_trap_quarantine_clear) &&
             ($veda_pcc_length != 20'hFFFFF);
          `BOGUS_USE($csr_rdata)
          `BOGUS_USE($csr_wdata)
@@ -3041,7 +3192,23 @@
          // -- software retains full override, this is a default not a
          // forced behavior, matching the Sail side's own explicit-override
          // test property); (5) retain.
+         // LOCAL_FAULT_RECOVERY_DESIGN.md / RTL mirror: the local-handler
+         // redirect joins this same priority mux as a NEW top-priority
+         // arm, ahead of the plain >>1$veda_trap_taken reset-to-unbounded
+         // arm (a redirect only ever fires when >>1$veda_trap_taken is
+         // already true too, so ordering it first is what lets it
+         // override that arm's own reset). Preserves -- never widens --
+         // >>1$veda_pcc_base/_length exactly as they stood the moment of
+         // the trap (the SAME captured values $veda_mepcc_base/_length
+         // latch from this same >>1 source one line below), matching
+         // Sail's own `veda_pcc_base = veda_mepcc_base` (itself just
+         // `veda_pcc_base` pre-trap) -- reading >>1$veda_pcc_base/_length
+         // directly here, NOT $veda_mepcc_*, since those registers lag by
+         // the same one-cycle pipe stage this register itself is on
+         // (Audit 2's own finding, confirmed by direct read before
+         // writing this).
          $veda_pcc_base[31:0] = $reset ? 32'b0 :
+                                 (>>1$veda_lh_redirect_active) ? >>1$veda_pcc_base :
                                  (>>1$veda_trap_taken) ? 32'b0 :
                                  (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? >>1$veda_mepcc_base :
                                  (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_base :
@@ -3049,12 +3216,477 @@
                                  (>>1$csr_write_en && >>1$csr_is_veda_pcc_base) ? >>1$csr_wdata[31:0] :
                                                                                    >>1$veda_pcc_base;
          $veda_pcc_length[19:0] = $reset ? 20'hFFFFF :
+                                   (>>1$veda_lh_redirect_active) ? >>1$veda_pcc_length :
                                    (>>1$veda_trap_taken) ? 20'hFFFFF :
                                    (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? >>1$veda_mepcc_length :
                                    (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[19:0] :
                                                                                        >>1$veda_pcc_length;
+         // ─────────────────────────────────────────────────────────
+         //  TRAP_QUARANTINE_DESIGN.md / RTL mirror (task #351):
+         //  veda_pcc_otype -- the live compartment's real IDENTITY, not
+         //  just its bounds. Mirrors $veda_pcc_base/$veda_pcc_length's
+         //  own priority-mux shape exactly, matching veda_regs.sail's
+         //  own real, deliberate finding that no mepcc-style saved
+         //  shadow is needed here: every real trap in this project
+         //  unconditionally abandons the live compartment (the same
+         //  >>1$veda_trap_taken chokepoint immediately above), so
+         //  nothing ever needs to "resume" with a remembered otype --
+         //  only a fresh OCInvoke/OCReturn success ever sets this again.
+         //  A real, accepted consequence of this (present on the Sail
+         //  side too, not an RTL-only gap): after an mret auto-restores
+         //  $veda_pcc_base/_length back to a resumed compartment's real
+         //  bounds, $veda_pcc_otype itself stays UNSEALED_OTYPE until
+         //  that compartment's own next OCInvoke/OCReturn -- a real
+         //  trap firing during that resumed-but-unidentified window
+         //  would record its fault against UNSEALED_OTYPE (0xFFFF)
+         //  rather than the resumed compartment's true identity. Named
+         //  here, not silently different from the already-verified Sail
+         //  behavior this RTL is required to mirror bit-for-bit.
+         // ─────────────────────────────────────────────────────────
+         // LOCAL_FAULT_RECOVERY_DESIGN.md / RTL mirror: "otype
+         // preservation" -- the real, subtle correctness property found
+         // (and initially gotten wrong) on the Sail side: the redirect
+         // path must NOT reset otype like the ordinary fallback arm does
+         // immediately below it. The handler is running as the SAME
+         // compartment (same bounds, preserved above), so a fault INSIDE
+         // the handler must still be attributed to ITS OWN otype for the
+         // quarantine-composition guarantee to mean anything -- if this
+         // were wrongly reset to UNSEALED_OTYPE, a second fault while the
+         // handler runs would be recorded against an otype that was never
+         // registered, and the redirect condition would wrongly fail
+         // after only one redirect instead of the real budget. Simply
+         // retaining >>1$veda_pcc_otype (this register's own prior value,
+         // unchanged) achieves this -- no new value to compute.
+         $veda_pcc_otype[15:0] = $reset ? 16'hFFFF :
+                                  (>>1$veda_lh_redirect_active) ? >>1$veda_pcc_otype :
+                                  (>>1$veda_trap_taken) ? 16'hFFFF :
+                                  (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_otype :
+                                  (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? 16'hFFFF :
+                                                                                              >>1$veda_pcc_otype;
+
+         // ─────────────────────────────────────────────────────────
+         //  TRAP_QUARANTINE_DESIGN.md / RTL mirror (task #351):
+         //  veda_trap_tracker -- 8-entry, linear-scan associative table
+         //  (NOT indexed directly by otype), each entry {valid, otype:
+         //  bits(16), count: bits(4)}. No existing linear-scan-with-N-
+         //  comparators precedent exists anywhere in this file (the ODT
+         //  is a directly-indexed byte array; /vreg is directly indexed
+         //  by a shared target register position) -- this is genuinely
+         //  new hardware design, not adapted from an existing idiom,
+         //  built from 8 hand-unrolled persistent-signal entries (no
+         //  M4/generate-loop precedent exists in this file either) using
+         //  the same reset/event-gated priority-mux shape
+         //  $veda_pcc_base/$veda_pcc_otype above already establish.
+         //
+         //  Three real, mutually-exclusive-by-construction trigger
+         //  events (confirmed: only one instruction decodes per cycle in
+         //  this single-issue core, and CSR-access/Custom-2/the trap-
+         //  taken OR-chain's own member opcodes are pairwise disjoint,
+         //  so no two of the three below can ever fire the same cycle):
+         //    RECORD (a real trap taken while a compartment was live --
+         //      reuses >>1$veda_trap_taken && (>>1$veda_pcc_length !=
+         //      20'hFFFFF) VERBATIM, the exact same chokepoint condition
+         //      already gating $veda_pcc_base/_length's own reset-to-
+         //      unbounded branch immediately above -- mirrors the real
+         //      bug/fix the Sail side found: veda_pcc_save_and_reset()
+         //      is the one true chokepoint every real trap-while-bounded
+         //      path shares, not a narrower per-instruction hook):
+         //      increment (saturating at 15) $veda_pcc_otype's own entry
+         //      if found, else allocate a fresh one (first invalid slot,
+         //      else evict the lowest-count entry).
+         //    DECAY (VEDA_OCINVOKE's or VEDA_OCRETURN's own SUCCESS path,
+         //      i.e. !violation, and a compartment was live going INTO
+         //      that transition): reset $veda_pcc_otype's own CURRENT
+         //      (pre-transition) entry's count to 0 -- "good behavior
+         //      earns forgiveness." Looked up against the SAME
+         //      $veda_pcc_otype value RECORD would have used (both read
+         //      the pre-transition identity), so the match/allocation-
+         //      target logic below is safely shared between the two.
+         //    CLEAR (a real, authorized write to the new
+         //      veda_trap_quarantine_clear CSR, 0x7C6): explicit operator
+         //      recovery, gated by the IDENTICAL ($priv ||
+         //      $veda_oda_authorized) authorization check ODT-Populate/
+         //      ODT-Destroy already use ($veda_odt_populate_violation/
+         //      $veda_odt_destroy_violation above) -- not a new
+         //      authorization mechanism -- plus the same live-compartment
+         //      CSR-escape guard every other compartment-state CSR here
+         //      already gets (see $veda_csr_escape_violation's own
+         //      updated OR-list above), matching the Sail side's own
+         //      write_CSR(0x7C6,...) exactly.
+         // ─────────────────────────────────────────────────────────
+         $veda_tt_target_otype[15:0] = >>1$veda_pcc_otype;
+         $veda_tt_record_active = (>>1$veda_trap_taken) && (>>1$veda_pcc_length != 20'hFFFFF);
+         $veda_tt_decay_active = ((>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ||
+                                   (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation))) &&
+                                  (>>1$veda_pcc_length != 20'hFFFFF);
+
+         // Per-entry match against the shared lookup target (RECORD and
+         // DECAY both search for this same otype -- safe to share, since
+         // the two are mutually exclusive per cycle, per the header
+         // comment above).
+         $veda_tt_match0 = >>1$veda_tt0_valid && (>>1$veda_tt0_otype == $veda_tt_target_otype);
+         $veda_tt_match1 = >>1$veda_tt1_valid && (>>1$veda_tt1_otype == $veda_tt_target_otype);
+         $veda_tt_match2 = >>1$veda_tt2_valid && (>>1$veda_tt2_otype == $veda_tt_target_otype);
+         $veda_tt_match3 = >>1$veda_tt3_valid && (>>1$veda_tt3_otype == $veda_tt_target_otype);
+         $veda_tt_match4 = >>1$veda_tt4_valid && (>>1$veda_tt4_otype == $veda_tt_target_otype);
+         $veda_tt_match5 = >>1$veda_tt5_valid && (>>1$veda_tt5_otype == $veda_tt_target_otype);
+         $veda_tt_match6 = >>1$veda_tt6_valid && (>>1$veda_tt6_otype == $veda_tt_target_otype);
+         $veda_tt_match7 = >>1$veda_tt7_valid && (>>1$veda_tt7_otype == $veda_tt_target_otype);
+         $veda_tt_any_match = $veda_tt_match0 || $veda_tt_match1 || $veda_tt_match2 || $veda_tt_match3 ||
+                               $veda_tt_match4 || $veda_tt_match5 || $veda_tt_match6 || $veda_tt_match7;
+
+         // First-invalid-slot search (RECORD's own allocation target when
+         // no match was found), lowest index wins -- a plain priority
+         // chain, the same idiom the cause/cap_idx muxes throughout this
+         // file already use for "first matching condition wins."
+         $veda_tt_inv0 = !(>>1$veda_tt0_valid);
+         $veda_tt_inv1 = !(>>1$veda_tt1_valid);
+         $veda_tt_inv2 = !(>>1$veda_tt2_valid);
+         $veda_tt_inv3 = !(>>1$veda_tt3_valid);
+         $veda_tt_inv4 = !(>>1$veda_tt4_valid);
+         $veda_tt_inv5 = !(>>1$veda_tt5_valid);
+         $veda_tt_inv6 = !(>>1$veda_tt6_valid);
+         $veda_tt_inv7 = !(>>1$veda_tt7_valid);
+         $veda_tt_any_inv = $veda_tt_inv0 || $veda_tt_inv1 || $veda_tt_inv2 || $veda_tt_inv3 ||
+                             $veda_tt_inv4 || $veda_tt_inv5 || $veda_tt_inv6 || $veda_tt_inv7;
+         $veda_tt_alloc0 = $veda_tt_inv0;
+         $veda_tt_alloc1 = $veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc2 = $veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc3 = $veda_tt_inv3 && !$veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc4 = $veda_tt_inv4 && !$veda_tt_inv3 && !$veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc5 = $veda_tt_inv5 && !$veda_tt_inv4 && !$veda_tt_inv3 && !$veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc6 = $veda_tt_inv6 && !$veda_tt_inv5 && !$veda_tt_inv4 && !$veda_tt_inv3 && !$veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+         $veda_tt_alloc7 = $veda_tt_inv7 && !$veda_tt_inv6 && !$veda_tt_inv5 && !$veda_tt_inv4 && !$veda_tt_inv3 && !$veda_tt_inv2 && !$veda_tt_inv1 && !$veda_tt_inv0;
+
+         // Lowest-count-entry search (RECORD's own eviction target when
+         // no match AND no invalid slot -- table genuinely full): a
+         // pairwise-min reduction tree down to the table-wide minimum
+         // count, then the same first-matching-index priority chain
+         // above picks the lowest-index entry actually holding that
+         // minimum (Sail's own real tie-break: `else if count[i] <
+         // count[victim] then victim = i`, i.e. the FIRST-scanned lowest
+         // count wins ties, not the last -- matched here by only ever
+         // updating victim on a strict `<`, mirrored by this chain's own
+         // strict "no earlier evict<n> already claimed it" guard).
+         $veda_tt_min01[3:0] = (>>1$veda_tt0_count <= >>1$veda_tt1_count) ? >>1$veda_tt0_count : >>1$veda_tt1_count;
+         $veda_tt_min23[3:0] = (>>1$veda_tt2_count <= >>1$veda_tt3_count) ? >>1$veda_tt2_count : >>1$veda_tt3_count;
+         $veda_tt_min45[3:0] = (>>1$veda_tt4_count <= >>1$veda_tt5_count) ? >>1$veda_tt4_count : >>1$veda_tt5_count;
+         $veda_tt_min67[3:0] = (>>1$veda_tt6_count <= >>1$veda_tt7_count) ? >>1$veda_tt6_count : >>1$veda_tt7_count;
+         $veda_tt_min0123[3:0] = ($veda_tt_min01 <= $veda_tt_min23) ? $veda_tt_min01 : $veda_tt_min23;
+         $veda_tt_min4567[3:0] = ($veda_tt_min45 <= $veda_tt_min67) ? $veda_tt_min45 : $veda_tt_min67;
+         $veda_tt_min_count[3:0] = ($veda_tt_min0123 <= $veda_tt_min4567) ? $veda_tt_min0123 : $veda_tt_min4567;
+         $veda_tt_evict0 = (>>1$veda_tt0_count == $veda_tt_min_count);
+         $veda_tt_evict1 = (>>1$veda_tt1_count == $veda_tt_min_count) && !$veda_tt_evict0;
+         $veda_tt_evict2 = (>>1$veda_tt2_count == $veda_tt_min_count) && !$veda_tt_evict1 && !$veda_tt_evict0;
+         $veda_tt_evict3 = (>>1$veda_tt3_count == $veda_tt_min_count) && !$veda_tt_evict2 && !$veda_tt_evict1 && !$veda_tt_evict0;
+         $veda_tt_evict4 = (>>1$veda_tt4_count == $veda_tt_min_count) && !$veda_tt_evict3 && !$veda_tt_evict2 && !$veda_tt_evict1 && !$veda_tt_evict0;
+         $veda_tt_evict5 = (>>1$veda_tt5_count == $veda_tt_min_count) && !$veda_tt_evict4 && !$veda_tt_evict3 && !$veda_tt_evict2 && !$veda_tt_evict1 && !$veda_tt_evict0;
+         $veda_tt_evict6 = (>>1$veda_tt6_count == $veda_tt_min_count) && !$veda_tt_evict5 && !$veda_tt_evict4 && !$veda_tt_evict3 && !$veda_tt_evict2 && !$veda_tt_evict1 && !$veda_tt_evict0;
+         $veda_tt_evict7 = (>>1$veda_tt7_count == $veda_tt_min_count) && !$veda_tt_evict6 && !$veda_tt_evict5 && !$veda_tt_evict4 && !$veda_tt_evict3 && !$veda_tt_evict2 && !$veda_tt_evict1 && !$veda_tt_evict0;
+
+         // Starvation-bypass fix, adversarial RTL-mirror review, 2026-08-19
+         // (TRAP_QUARANTINE_RESULTS.md): the plain global-minimum eviction
+         // above let an attacker who controls several OTHER otypes drive
+         // them all to the quarantine threshold (count==3) and force the
+         // next fresh fault to evict a genuinely quarantined VICTIM entry,
+         // silently un-quarantining it. Fix needs no change to the
+         // min-search itself -- a "safe" (non-quarantined, count<3) entry
+         // always has a strictly lower count than any quarantined
+         // (count>=3) entry, so the existing global-minimum search above
+         // ALREADY always lands on a safe entry whenever one exists. The
+         // only real gap is the case where NO safe entry exists (every one
+         // of the 8 is simultaneously quarantined) -- there, the "minimum"
+         // is itself >=3, meaning the search would otherwise evict a
+         // quarantined entry. Gate that one case off entirely: a fault
+         // against a brand-new otype when the table is completely
+         // saturated with quarantined entries is simply left untracked
+         // (mirrors the Sail-side fix's own explicit "do nothing" branch,
+         // veda_regs.sail's veda_trap_tracker_record_fault) rather than
+         // evicting anyone -- a bounded, self-limiting condition: all 8
+         // already-tracked compartments are, by construction, already
+         // refused re-entry, and 8 simultaneously-quarantined compartments
+         // is itself a loud, monitorable signal. Named as an explicit,
+         // accepted residual limit in TRAP_QUARANTINE_DESIGN.md.
+         $veda_tt_any_safe = ($veda_tt_min_count < 4'd3);
+
+         // RECORD's own final "this entry gets the fresh write" target
+         // when no match was found: the first invalid slot if any exists,
+         // else the evicted lowest-count slot -- but only if that slot is
+         // not itself already quarantined (see $veda_tt_any_safe above).
+         $veda_tt_write0 = $veda_tt_any_inv ? $veda_tt_alloc0 : ($veda_tt_any_safe && $veda_tt_evict0);
+         $veda_tt_write1 = $veda_tt_any_inv ? $veda_tt_alloc1 : ($veda_tt_any_safe && $veda_tt_evict1);
+         $veda_tt_write2 = $veda_tt_any_inv ? $veda_tt_alloc2 : ($veda_tt_any_safe && $veda_tt_evict2);
+         $veda_tt_write3 = $veda_tt_any_inv ? $veda_tt_alloc3 : ($veda_tt_any_safe && $veda_tt_evict3);
+         $veda_tt_write4 = $veda_tt_any_inv ? $veda_tt_alloc4 : ($veda_tt_any_safe && $veda_tt_evict4);
+         $veda_tt_write5 = $veda_tt_any_inv ? $veda_tt_alloc5 : ($veda_tt_any_safe && $veda_tt_evict5);
+         $veda_tt_write6 = $veda_tt_any_inv ? $veda_tt_alloc6 : ($veda_tt_any_safe && $veda_tt_evict6);
+         $veda_tt_write7 = $veda_tt_any_inv ? $veda_tt_alloc7 : ($veda_tt_any_safe && $veda_tt_evict7);
+
+         // CLEAR's own lookup: a genuinely different otype target
+         // (software-supplied via csr_wdata), a genuinely different
+         // authorization gate, and its own separate match set (cannot
+         // share $veda_tt_match* above, which is keyed on
+         // $veda_tt_target_otype, not the CSR's own operand).
+         $veda_tt_clear_otype[15:0] = >>1$csr_wdata[15:0];
+         $veda_tt_clear_active = >>1$csr_write_en && >>1$csr_is_veda_trap_quarantine_clear &&
+                                  !(>>1$veda_csr_escape_violation) &&
+                                  (>>1$priv || >>1$veda_oda_authorized);
+         $veda_tt_clear_match0 = >>1$veda_tt0_valid && (>>1$veda_tt0_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match1 = >>1$veda_tt1_valid && (>>1$veda_tt1_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match2 = >>1$veda_tt2_valid && (>>1$veda_tt2_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match3 = >>1$veda_tt3_valid && (>>1$veda_tt3_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match4 = >>1$veda_tt4_valid && (>>1$veda_tt4_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match5 = >>1$veda_tt5_valid && (>>1$veda_tt5_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match6 = >>1$veda_tt6_valid && (>>1$veda_tt6_otype == $veda_tt_clear_otype);
+         $veda_tt_clear_match7 = >>1$veda_tt7_valid && (>>1$veda_tt7_otype == $veda_tt_clear_otype);
+
+         // The 8 tracker entries themselves -- hand-unrolled (no
+         // generate-loop precedent in this file), each a 3-field
+         // persistent-signal group following the identical reset/event-
+         // gated priority-mux shape used throughout this file.
+         $veda_tt0_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match0) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write0) ? 1'b1 : >>1$veda_tt0_valid;
+         $veda_tt1_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match1) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write1) ? 1'b1 : >>1$veda_tt1_valid;
+         $veda_tt2_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match2) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write2) ? 1'b1 : >>1$veda_tt2_valid;
+         $veda_tt3_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match3) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write3) ? 1'b1 : >>1$veda_tt3_valid;
+         $veda_tt4_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match4) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write4) ? 1'b1 : >>1$veda_tt4_valid;
+         $veda_tt5_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match5) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write5) ? 1'b1 : >>1$veda_tt5_valid;
+         $veda_tt6_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match6) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write6) ? 1'b1 : >>1$veda_tt6_valid;
+         $veda_tt7_valid = $reset ? 1'b0 : ($veda_tt_clear_active && $veda_tt_clear_match7) ? 1'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write7) ? 1'b1 : >>1$veda_tt7_valid;
+
+         $veda_tt0_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write0) ? $veda_tt_target_otype : >>1$veda_tt0_otype;
+         $veda_tt1_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write1) ? $veda_tt_target_otype : >>1$veda_tt1_otype;
+         $veda_tt2_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write2) ? $veda_tt_target_otype : >>1$veda_tt2_otype;
+         $veda_tt3_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write3) ? $veda_tt_target_otype : >>1$veda_tt3_otype;
+         $veda_tt4_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write4) ? $veda_tt_target_otype : >>1$veda_tt4_otype;
+         $veda_tt5_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write5) ? $veda_tt_target_otype : >>1$veda_tt5_otype;
+         $veda_tt6_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write6) ? $veda_tt_target_otype : >>1$veda_tt6_otype;
+         $veda_tt7_otype[15:0] = $reset ? 16'b0 : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write7) ? $veda_tt_target_otype : >>1$veda_tt7_otype;
+
+         // count: CLEAR (->0) takes priority over RECORD's own increment
+         // (mutually exclusive per cycle anyway, per the header comment,
+         // but ordered defensively, matching this file's own established
+         // "real trap always wins" style of explicit priority ordering
+         // elsewhere); RECORD's match-found increment (saturating at 15)
+         // beats RECORD's own fresh-write (count=1, only reachable when
+         // !any_match, so these two are already mutually exclusive by
+         // construction too); DECAY resets a matched entry's count to 0.
+         $veda_tt0_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match0) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match0) ? ((>>1$veda_tt0_count == 4'hf) ? 4'hf : (>>1$veda_tt0_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write0) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match0) ? 4'b0 : >>1$veda_tt0_count;
+         $veda_tt1_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match1) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match1) ? ((>>1$veda_tt1_count == 4'hf) ? 4'hf : (>>1$veda_tt1_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write1) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match1) ? 4'b0 : >>1$veda_tt1_count;
+         $veda_tt2_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match2) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match2) ? ((>>1$veda_tt2_count == 4'hf) ? 4'hf : (>>1$veda_tt2_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write2) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match2) ? 4'b0 : >>1$veda_tt2_count;
+         $veda_tt3_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match3) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match3) ? ((>>1$veda_tt3_count == 4'hf) ? 4'hf : (>>1$veda_tt3_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write3) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match3) ? 4'b0 : >>1$veda_tt3_count;
+         $veda_tt4_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match4) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match4) ? ((>>1$veda_tt4_count == 4'hf) ? 4'hf : (>>1$veda_tt4_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write4) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match4) ? 4'b0 : >>1$veda_tt4_count;
+         $veda_tt5_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match5) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match5) ? ((>>1$veda_tt5_count == 4'hf) ? 4'hf : (>>1$veda_tt5_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write5) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match5) ? 4'b0 : >>1$veda_tt5_count;
+         $veda_tt6_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match6) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match6) ? ((>>1$veda_tt6_count == 4'hf) ? 4'hf : (>>1$veda_tt6_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write6) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match6) ? 4'b0 : >>1$veda_tt6_count;
+         $veda_tt7_count[3:0] = $reset ? 4'b0 : ($veda_tt_clear_active && $veda_tt_clear_match7) ? 4'b0 : ($veda_tt_record_active && $veda_tt_match7) ? ((>>1$veda_tt7_count == 4'hf) ? 4'hf : (>>1$veda_tt7_count + 4'd1)) : ($veda_tt_record_active && !$veda_tt_any_match && $veda_tt_write7) ? 4'd1 : ($veda_tt_decay_active && $veda_tt_match7) ? 4'b0 : >>1$veda_tt7_count;
+
+         // ─────────────────────────────────────────────────────────
+         //  LOCAL_FAULT_RECOVERY_DESIGN.md / RTL mirror: veda_local_
+         //  handler_table -- 8-entry, otype-keyed table, each entry
+         //  {valid, otype: bits(16), entry_addr: bits(32)}. Hand-
+         //  unrolled, matching $veda_tt0..7's own established shape
+         //  immediately above -- deliberately a SEPARATE table (not
+         //  folded into $veda_tt*): quarantine entries decay/evict
+         //  opportunistically (the tournament-min eviction above), a
+         //  registered handler must be stable and never silently evicted
+         //  by unrelated trap churn from other compartments (confirmed
+         //  rationale, LOCAL_FAULT_RECOVERY_DESIGN.md's own "Reused, not
+         //  reinvented" section).
+         //
+         //  Two real, mutually-exclusive-by-construction consumers:
+         //    (1) VEDA_SET_LOCAL_HANDLER's own decode-time checks above
+         //        ($veda_lh_registered/$veda_lh_reg_any_inv -- bare,
+         //        keyed on the CURRENT live compartment's own bare
+         //        $veda_pcc_otype, i.e. "as of right now, before this
+         //        instruction's own table write").
+         //    (2) The trap-time redirect decision below
+         //        ($veda_lh_redirect_active) -- ALSO bare, ALSO keyed on
+         //        bare $veda_pcc_otype, because $alt_pc (the PC-on-trap
+         //        mux further below) is itself a same-cycle, non->>1
+         //        combinational mux: the trapping compartment's own
+         //        otype at the moment of the fault IS bare $veda_pcc_otype
+         //        this exact cycle (it only resets to UNSEALED_OTYPE
+         //        starting the FOLLOWING cycle, via the >>1$veda_trap_taken
+         //        arm in $veda_pcc_otype's own register mux below) --
+         //        deliberately NOT the >>1$veda_pcc_otype-keyed shape
+         //        $veda_tt_target_otype uses (that shape is correct for
+         //        the trap-tracker's own RECORD/DECAY, which really do
+         //        live one cycle later, in the same >>1-triggered
+         //        register-update context as $veda_pcc_base/_length's
+         //        own trap-reset arm) -- reusing the SAME bare decision
+         //        signal ($veda_lh_redirect_active, defined once) for
+         //        both $alt_pc (bare, this cycle) and the
+         //        $veda_pcc_base/_length/_otype register arms (via
+         //        >>1$veda_lh_redirect_active, next cycle) is the same
+         //        "define once, consume bare here / >>1 there" idiom
+         //        this file's own $veda_trap_taken already establishes
+         //        (Audit 1's own finding: "Both hooks key off the single
+         //        flopped $veda_trap_taken").
+         //
+         //  Quarantine-check semantics for the redirect decision
+         //  ($veda_lh_pcc_otype_quarantined below): reads the trap-
+         //  tracker's own CURRENT (bare, pre-this-fault) count/threshold,
+         //  the identical shape $veda_ocinvoke_quarantined already
+         //  established, just re-keyed on bare $veda_pcc_otype instead of
+         //  $veda_rs1cap_otype. This is a real, honest structural
+         //  difference from Sail's own sequential "record_fault() then
+         //  check is_quarantined()" (which observes THIS fault's own
+         //  just-incremented count): RTL's redirect decision is a single
+         //  same-cycle combinational mux that cannot observe a register
+         //  write not yet committed, so it necessarily checks the count
+         //  as it stood BEFORE this fault's own increment (which the
+         //  existing $veda_tt_record_active machinery still applies,
+         //  unconditionally, completely unchanged, one cycle later) --
+         //  empirically verified via trace below, not assumed to match
+         //  Sail's "exactly 2 redirects" result (see
+         //  LOCAL_FAULT_RECOVERY_RESULTS.md for the RTL-side finding).
+         // ─────────────────────────────────────────────────────────
+         $veda_lh_reg_match0 = $veda_lh0_valid && ($veda_lh0_otype == $veda_pcc_otype);
+         $veda_lh_reg_match1 = $veda_lh1_valid && ($veda_lh1_otype == $veda_pcc_otype);
+         $veda_lh_reg_match2 = $veda_lh2_valid && ($veda_lh2_otype == $veda_pcc_otype);
+         $veda_lh_reg_match3 = $veda_lh3_valid && ($veda_lh3_otype == $veda_pcc_otype);
+         $veda_lh_reg_match4 = $veda_lh4_valid && ($veda_lh4_otype == $veda_pcc_otype);
+         $veda_lh_reg_match5 = $veda_lh5_valid && ($veda_lh5_otype == $veda_pcc_otype);
+         $veda_lh_reg_match6 = $veda_lh6_valid && ($veda_lh6_otype == $veda_pcc_otype);
+         $veda_lh_reg_match7 = $veda_lh7_valid && ($veda_lh7_otype == $veda_pcc_otype);
+         // "Is there a handler registered for the CURRENT live
+         // compartment's own otype" -- shared by VEDA_SET_LOCAL_HANDLER's
+         // own overwrite-vs-allocate decision AND the trap-time redirect
+         // check, both keyed on the identical bare $veda_pcc_otype.
+         $veda_lh_registered = $veda_lh_reg_match0 || $veda_lh_reg_match1 || $veda_lh_reg_match2 || $veda_lh_reg_match3 ||
+                                $veda_lh_reg_match4 || $veda_lh_reg_match5 || $veda_lh_reg_match6 || $veda_lh_reg_match7;
+         $veda_lh_entry_addr[31:0] =
+            $veda_lh_reg_match0 ? $veda_lh0_entry_addr :
+            $veda_lh_reg_match1 ? $veda_lh1_entry_addr :
+            $veda_lh_reg_match2 ? $veda_lh2_entry_addr :
+            $veda_lh_reg_match3 ? $veda_lh3_entry_addr :
+            $veda_lh_reg_match4 ? $veda_lh4_entry_addr :
+            $veda_lh_reg_match5 ? $veda_lh5_entry_addr :
+            $veda_lh_reg_match6 ? $veda_lh6_entry_addr :
+            $veda_lh_reg_match7 ? $veda_lh7_entry_addr :
+                                   32'b0;
+         $veda_lh_reg_inv0 = !$veda_lh0_valid;
+         $veda_lh_reg_inv1 = !$veda_lh1_valid;
+         $veda_lh_reg_inv2 = !$veda_lh2_valid;
+         $veda_lh_reg_inv3 = !$veda_lh3_valid;
+         $veda_lh_reg_inv4 = !$veda_lh4_valid;
+         $veda_lh_reg_inv5 = !$veda_lh5_valid;
+         $veda_lh_reg_inv6 = !$veda_lh6_valid;
+         $veda_lh_reg_inv7 = !$veda_lh7_valid;
+         $veda_lh_reg_any_inv = $veda_lh_reg_inv0 || $veda_lh_reg_inv1 || $veda_lh_reg_inv2 || $veda_lh_reg_inv3 ||
+                                 $veda_lh_reg_inv4 || $veda_lh_reg_inv5 || $veda_lh_reg_inv6 || $veda_lh_reg_inv7;
+
+         // Trap-tracker quarantine check, re-keyed on bare $veda_pcc_otype
+         // (the trapping compartment's own live identity) -- the
+         // identical shape $veda_ocinvoke_quarantined already established
+         // above, per Audit 2's own finding.
+         $veda_lh_pcc_otype_quarantined =
+            ($veda_tt0_valid && ($veda_tt0_otype == $veda_pcc_otype) && ($veda_tt0_count >= 4'd3)) ||
+            ($veda_tt1_valid && ($veda_tt1_otype == $veda_pcc_otype) && ($veda_tt1_count >= 4'd3)) ||
+            ($veda_tt2_valid && ($veda_tt2_otype == $veda_pcc_otype) && ($veda_tt2_count >= 4'd3)) ||
+            ($veda_tt3_valid && ($veda_tt3_otype == $veda_pcc_otype) && ($veda_tt3_count >= 4'd3)) ||
+            ($veda_tt4_valid && ($veda_tt4_otype == $veda_pcc_otype) && ($veda_tt4_count >= 4'd3)) ||
+            ($veda_tt5_valid && ($veda_tt5_otype == $veda_pcc_otype) && ($veda_tt5_count >= 4'd3)) ||
+            ($veda_tt6_valid && ($veda_tt6_otype == $veda_pcc_otype) && ($veda_tt6_count >= 4'd3)) ||
+            ($veda_tt7_valid && ($veda_tt7_otype == $veda_pcc_otype) && ($veda_tt7_count >= 4'd3));
+
+         // The real trap-time redirect decision -- top-priority arm for
+         // both $alt_pc (bare, this cycle) and the
+         // $veda_pcc_base/_length/_otype register mux (via >>1, next
+         // cycle). Gated on a real trap taken FROM a live, bounded
+         // compartment (matches $veda_tt_record_active's own identical
+         // gating condition immediately above -- only a live compartment
+         // has a real otype to redirect on behalf of), not quarantined,
+         // and a registered handler exists for that otype.
+         // Defense-in-depth (see $veda_osethandler_violation's own comment
+         // for the full explanation): registration under the shared
+         // UNSEALED_OTYPE sentinel is now refused at the source, so
+         // $veda_lh_registered should never be true when $veda_pcc_otype
+         // == 16'hFFFF in practice -- this explicit exclusion means a
+         // future change to the registration side alone cannot silently
+         // reopen this exact hole here.
+         $veda_lh_redirect_active = $veda_trap_taken && ($veda_pcc_length != 20'hFFFFF) &&
+                                     ($veda_pcc_otype != 16'hFFFF) &&
+                                     !$veda_lh_pcc_otype_quarantined && $veda_lh_registered;
+
+         // Table WRITE (VEDA_SET_LOCAL_HANDLER's own success side effect)
+         // -- fires one cycle after a successful osethandler, mirroring
+         // every other persistent-signal write in this file. Overwrites
+         // an existing SAME-otype entry in place, else allocates the
+         // first free slot -- NEVER evicts a different otype's entry
+         // (this instruction's own decode-time table-full check above
+         // already refuses the instruction entirely rather than ever
+         // reaching an eviction decision, so no eviction logic exists
+         // here at all, unlike $veda_tt*'s own tournament-min eviction).
+         $veda_lh_write_active = >>1$is_veda_osethandler && !(>>1$veda_osethandler_violation);
+         $veda_lh_target_otype[15:0] = >>1$veda_pcc_otype;
+         $veda_lh_target_addr[31:0] = >>1$veda_osethandler_target[31:0];
+         $veda_lh_write_match0 = >>1$veda_lh0_valid && (>>1$veda_lh0_otype == $veda_lh_target_otype);
+         $veda_lh_write_match1 = >>1$veda_lh1_valid && (>>1$veda_lh1_otype == $veda_lh_target_otype);
+         $veda_lh_write_match2 = >>1$veda_lh2_valid && (>>1$veda_lh2_otype == $veda_lh_target_otype);
+         $veda_lh_write_match3 = >>1$veda_lh3_valid && (>>1$veda_lh3_otype == $veda_lh_target_otype);
+         $veda_lh_write_match4 = >>1$veda_lh4_valid && (>>1$veda_lh4_otype == $veda_lh_target_otype);
+         $veda_lh_write_match5 = >>1$veda_lh5_valid && (>>1$veda_lh5_otype == $veda_lh_target_otype);
+         $veda_lh_write_match6 = >>1$veda_lh6_valid && (>>1$veda_lh6_otype == $veda_lh_target_otype);
+         $veda_lh_write_match7 = >>1$veda_lh7_valid && (>>1$veda_lh7_otype == $veda_lh_target_otype);
+         $veda_lh_write_any_match = $veda_lh_write_match0 || $veda_lh_write_match1 || $veda_lh_write_match2 || $veda_lh_write_match3 ||
+                                     $veda_lh_write_match4 || $veda_lh_write_match5 || $veda_lh_write_match6 || $veda_lh_write_match7;
+         $veda_lh_write_inv0 = !(>>1$veda_lh0_valid);
+         $veda_lh_write_inv1 = !(>>1$veda_lh1_valid);
+         $veda_lh_write_inv2 = !(>>1$veda_lh2_valid);
+         $veda_lh_write_inv3 = !(>>1$veda_lh3_valid);
+         $veda_lh_write_inv4 = !(>>1$veda_lh4_valid);
+         $veda_lh_write_inv5 = !(>>1$veda_lh5_valid);
+         $veda_lh_write_inv6 = !(>>1$veda_lh6_valid);
+         $veda_lh_write_inv7 = !(>>1$veda_lh7_valid);
+         $veda_lh_write_alloc0 = $veda_lh_write_inv0;
+         $veda_lh_write_alloc1 = $veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc2 = $veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc3 = $veda_lh_write_inv3 && !$veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc4 = $veda_lh_write_inv4 && !$veda_lh_write_inv3 && !$veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc5 = $veda_lh_write_inv5 && !$veda_lh_write_inv4 && !$veda_lh_write_inv3 && !$veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc6 = $veda_lh_write_inv6 && !$veda_lh_write_inv5 && !$veda_lh_write_inv4 && !$veda_lh_write_inv3 && !$veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_write_alloc7 = $veda_lh_write_inv7 && !$veda_lh_write_inv6 && !$veda_lh_write_inv5 && !$veda_lh_write_inv4 && !$veda_lh_write_inv3 && !$veda_lh_write_inv2 && !$veda_lh_write_inv1 && !$veda_lh_write_inv0;
+         $veda_lh_wsel0 = $veda_lh_write_match0 || (!$veda_lh_write_any_match && $veda_lh_write_alloc0);
+         $veda_lh_wsel1 = $veda_lh_write_match1 || (!$veda_lh_write_any_match && $veda_lh_write_alloc1);
+         $veda_lh_wsel2 = $veda_lh_write_match2 || (!$veda_lh_write_any_match && $veda_lh_write_alloc2);
+         $veda_lh_wsel3 = $veda_lh_write_match3 || (!$veda_lh_write_any_match && $veda_lh_write_alloc3);
+         $veda_lh_wsel4 = $veda_lh_write_match4 || (!$veda_lh_write_any_match && $veda_lh_write_alloc4);
+         $veda_lh_wsel5 = $veda_lh_write_match5 || (!$veda_lh_write_any_match && $veda_lh_write_alloc5);
+         $veda_lh_wsel6 = $veda_lh_write_match6 || (!$veda_lh_write_any_match && $veda_lh_write_alloc6);
+         $veda_lh_wsel7 = $veda_lh_write_match7 || (!$veda_lh_write_any_match && $veda_lh_write_alloc7);
+
+         // The 8 local-handler-table entries themselves -- hand-unrolled,
+         // reset/event-gated priority-mux shape matching $veda_tt0..7's
+         // own above (and $veda_pcc_base/_otype's own further above).
+         $veda_lh0_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel0) ? 1'b1 : >>1$veda_lh0_valid;
+         $veda_lh1_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel1) ? 1'b1 : >>1$veda_lh1_valid;
+         $veda_lh2_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel2) ? 1'b1 : >>1$veda_lh2_valid;
+         $veda_lh3_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel3) ? 1'b1 : >>1$veda_lh3_valid;
+         $veda_lh4_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel4) ? 1'b1 : >>1$veda_lh4_valid;
+         $veda_lh5_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel5) ? 1'b1 : >>1$veda_lh5_valid;
+         $veda_lh6_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel6) ? 1'b1 : >>1$veda_lh6_valid;
+         $veda_lh7_valid = $reset ? 1'b0 : ($veda_lh_write_active && $veda_lh_wsel7) ? 1'b1 : >>1$veda_lh7_valid;
+
+         $veda_lh0_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel0) ? $veda_lh_target_otype : >>1$veda_lh0_otype;
+         $veda_lh1_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel1) ? $veda_lh_target_otype : >>1$veda_lh1_otype;
+         $veda_lh2_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel2) ? $veda_lh_target_otype : >>1$veda_lh2_otype;
+         $veda_lh3_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel3) ? $veda_lh_target_otype : >>1$veda_lh3_otype;
+         $veda_lh4_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel4) ? $veda_lh_target_otype : >>1$veda_lh4_otype;
+         $veda_lh5_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel5) ? $veda_lh_target_otype : >>1$veda_lh5_otype;
+         $veda_lh6_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel6) ? $veda_lh_target_otype : >>1$veda_lh6_otype;
+         $veda_lh7_otype[15:0] = $reset ? 16'b0 : ($veda_lh_write_active && $veda_lh_wsel7) ? $veda_lh_target_otype : >>1$veda_lh7_otype;
+
+         $veda_lh0_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel0) ? $veda_lh_target_addr : >>1$veda_lh0_entry_addr;
+         $veda_lh1_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel1) ? $veda_lh_target_addr : >>1$veda_lh1_entry_addr;
+         $veda_lh2_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel2) ? $veda_lh_target_addr : >>1$veda_lh2_entry_addr;
+         $veda_lh3_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel3) ? $veda_lh_target_addr : >>1$veda_lh3_entry_addr;
+         $veda_lh4_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel4) ? $veda_lh_target_addr : >>1$veda_lh4_entry_addr;
+         $veda_lh5_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel5) ? $veda_lh_target_addr : >>1$veda_lh5_entry_addr;
+         $veda_lh6_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel6) ? $veda_lh_target_addr : >>1$veda_lh6_entry_addr;
+         $veda_lh7_entry_addr[31:0] = $reset ? 32'b0 : ($veda_lh_write_active && $veda_lh_wsel7) ? $veda_lh_target_addr : >>1$veda_lh7_entry_addr;
+
          // Real bug found (not copied blindly from Sail) while designing
          // this mirror: the pre-existing trap-time capture below was
          // UNCONDITIONAL (captured on every trap, even one that fired while
@@ -3281,7 +3913,18 @@
                    ($is_veda_ocjalr && !$veda_ocjalr_violation) ||
                    ($is_veda_ocreturn && !$veda_ocreturn_violation) ||
                    $is_jal || $is_jalr || $branch_taken;
-         $alt_pc[63:0] = $veda_trap_taken ? $mtvec :
+         // LOCAL_FAULT_RECOVERY_DESIGN.md / RTL mirror: the local-handler
+         // redirect's own real jump -- checked AHEAD of the plain
+         // $veda_trap_taken -> $mtvec arm (redirect implies
+         // $veda_trap_taken is already true, so this must be strictly
+         // higher priority to ever be selected). Bare (this-cycle), the
+         // same same-cycle timing every other real trap/redirect target
+         // in this mux already uses -- $veda_lh_redirect_active is itself
+         // bare (defined alongside veda_local_handler_table above), so no
+         // >>1 needed here, matching $veda_trap_taken's own bare use one
+         // arm below.
+         $alt_pc[63:0] = $veda_lh_redirect_active ? {32'b0, $veda_lh_entry_addr} :
+                          $veda_trap_taken ? $mtvec :
                           $is_mret         ? $mepc :
                           ($is_veda_ocinvoke && !$veda_ocinvoke_violation) ? $veda_ocinvoke_target :
                           ($is_veda_ocjalr && !$veda_ocjalr_violation) ? $veda_ocjalr_target :

@@ -454,7 +454,21 @@ still a fixed RTL `localparam`, not a real per-instance parameter. This remains 
 undertaking on this list, unchanged in scope since the original assessment, now with one additional
 concrete, cited security consequence (the TCM covert-channel bound) attached to it.
 
-### 2.8 -- Still open: `Length`/`Offset` 16-bit cap
+### 2.8 -- CLOSED, 2026-08-16/19 (stale header corrected 2026-08-19): `Length`/`Offset` widened 16->20 bits
+
+This section's own text below (dated against the 2026-08-09 pass) was left unedited after the real
+fix shipped -- a genuine documentation-staleness bug, corrected here rather than silently left to
+mislead a future read. `Length`/`Offset` were widened from 16 to 20 bits (field widening, not
+CHERI-Concentrate-style compression -- see this document's own "DECIDED, 2026-08-16" section below
+for the reasoning), closing the honest 65,536-byte per-object cap this section originally described.
+Full verification: `MILESTONE_LENGTH_OFFSET_WIDENING_RESULTS.md` (Sail, 70/70 regression),
+`rtl/MILESTONE_LENGTH_OFFSET_WIDENING_RTL_RESULTS.md` (RTL, full smoke + ACT4 regression),
+`TOOLCHAIN_MILESTONE_22_WIDENING_PARITY_RESULTS.md` (toolchain-side stale-constant fixes this
+widening's own blast radius required). Original text preserved below for historical record only --
+do not read it as current status.
+
+<details>
+<summary>Original 2026-08-09 text (superseded)</summary>
 
 Re-verified directly against `VEDA_CORE_SPEC.md`'s own capability-field table: `Length` and `Offset`
 are still both 16 bits, the field-table note is unchanged, still stating the same honest trade-off --
@@ -463,6 +477,8 @@ capability register... or a CHERI-style compressed encoding." No compressed-boun
 implementation work exists anywhere in the milestone corpus checked for this pass (Sail Milestones
 15-22, RTL Milestones 15-25, the full toolchain track). Still a stated, honest, load-bearing limit,
 not free to lift.
+
+</details>
 
 ### 2.9 -- Still open, but narrower than before: formal-verification maturity gap
 
@@ -747,18 +763,25 @@ moment it's found, not deferring it into silent loss.
    arbitrated module). Icarus Verilog itself was confirmed NOT the obstacle (its
    own official docs show trivial multi-instance support). Stays in Tier 2 exactly
    where it already was; no shortcut found.
-3. **NEW, real, not urgent: repeated-trap/compartment-reset DoS resilience of the
-   OCInvoke/PCC compartment model has never been analyzed.** CHERIoT's own
-   red-team-informed design paper (Amar et al., ACM SOSP '25, official,
-   cross-industry-authored) explicitly names "an attacker repeatedly triggering
-   traps to force a victim compartment to spend all its cycles micro-rebooting" as
-   a known, NOT-prevented-by-capabilities residual risk, with a named mitigation
-   pattern (Gecko's "shadow compartments") that CHERIoT itself has not yet
-   implemented either. Veda-Core's own compartment/trap model (Milestone 14's PCC
-   bounding, Milestone 21's universal-reset-on-trap) has no existing analysis
-   against this specific attack class. Real, concrete, cheap to schedule as a
-   future dedicated design/research pass; not urgent (no active exploit, no
-   contradicted claim).
+3. **CLOSED (Sail), 2026-08-19: repeated-trap/compartment-reset DoS resilience of
+   the OCInvoke/PCC compartment model.** CHERIoT's own red-team-informed design
+   paper (Amar et al., ACM SOSP '25, official, cross-industry-authored) names "an
+   attacker repeatedly triggering traps to force a victim compartment to spend all
+   its cycles micro-rebooting" as a known, NOT-prevented-by-capabilities residual
+   risk. Empirically confirmed Veda-Core was exposed (20 unmitigated
+   trap-then-reinvoke round trips, zero hardware pushback), then closed with a
+   genuinely novel, hardware-native mechanism -- `VEDA_TRAP_QUARANTINE` -- rather
+   than copying either cited mitigation (Gecko is software-only SFI-based fallback
+   swapping; the real RISC-V `Ssdbltrp` precedent is depth-based, not rate-based).
+   Per-otype hardware trap counter, threshold-refused re-entry at `OCInvoke`,
+   event-based decay on clean forward progress (no CLINT/timer dependency). Two
+   real corrections found only during implementation (wrong trap chokepoint;
+   `OCRETURN`'s otype is not a real per-destination identity) -- see
+   `TRAP_QUARANTINE_DESIGN.md` and `TRAP_QUARANTINE_RESULTS.md` for full
+   research/design/verification. Sail-side only: 72/72 self-check, both mutation
+   tests confirmed load-bearing, zero regressions in the compiler-layer toolchain
+   suites. RTL mirror not yet built (named as a separate future pass in the
+   results doc, matching this project's established Sail-first sequencing).
 4. **NEW, real, not urgent for THIS (embedded, single-cycle, non-speculative) line
    specifically, but a real forward constraint for any future speculative/
    pipelined Veda-Core line:** Kim et al., "TikTag: Breaking ARM's Memory Tagging
@@ -781,11 +804,98 @@ moment it's found, not deferring it into silent loss.
    pass cannot reach -- was also found, but belongs to the separate Linux-line
    repos, out of this document's own scope; not edited from here.)
 
+### 3.5 -- CLOSED (Sail + RTL), 2026-08-19, found and closed the same day, including a real critical bug found by adversarial review: no compartment-local, PCC-bounded fault recovery
+
+**Closed same-session on both layers, not deferred to "the next dedicated design/research cycle" as
+this section's own original text below said it would need to be.** `VEDA_LOCAL_HANDLER` -- a
+hardware-mediated, self-registration-only redirect that can never widen PCC beyond the faulting
+compartment's own already-captured bounds, composing with `VEDA_TRAP_QUARANTINE` (same session) as its
+own safety backstop rather than a parallel one -- closes the gap this section names below. Full
+research grounding, design decision, and the real corrections found while designing are in
+`LOCAL_FAULT_RECOVERY_DESIGN.md`. Sail verification (positive, 4 negatives, 2 mutation tests, 79/79
+Sail regression + zero-regression toolchain sweep) is in `LOCAL_FAULT_RECOVERY_RESULTS.md`; the RTL
+mirror (built the same session via a multi-agent workflow, 72/72 smoke + 51/51 ACT4 conformance) is in
+`LOCAL_FAULT_RECOVERY_RTL_RESULTS.md`.
+
+**A real, critical security gap was found by adversarial review AFTER both layers first reported
+"done," and closed on both before this milestone was actually considered closed** -- named here
+explicitly, not glossed over: two independent adversarial reviews of the finished RTL mirror (different
+lenses: general correctness, and security) both, independently, found that `osethandler`'s original
+"live compartment" check tested only PCC boundedness, never `veda_pcc_otype` identity -- so a
+compartment resumed via an ordinary trap+`mret` round trip, or via `OCReturn` (both leave
+`veda_pcc_otype` at the shared `UNSEALED_OTYPE` sentinel), could register a handler-table entry under
+that shared key, letting a completely unrelated compartment resumed into the same ordinary window
+collide on it and get redirected into a different compartment's chosen handler address -- defeating the
+mechanism's entire purpose. Confirmed as real on the Sail side too (not merely an RTL-porting artifact)
+by direct primary-source reading, and confirmed reachable by this project's own already-shipped
+`runtime/veda_sched_asm.S` scheduler threads (entered exclusively via `OCReturn`), no attacker-crafted
+sequence required. Fixed identically on both layers: `UNSEALED_OTYPE` excluded as an eligible
+registration key, plus a defense-in-depth exclusion at the redirect chokepoint. New test on each layer,
+each independently mutation-tested and confirmed load-bearing. Full details in both results docs' own
+"Adversarial review finding and fix" sections.
+
+Original text preserved below for historical record of how the gap was found -- do not read the sizing
+estimate in its final paragraph as still current; it was rendered moot by finding the mechanism reused
+enough already-verified infrastructure to close in-session.
+
+<details>
+<summary>Original 2026-08-19 finding text (context preserved; closure above supersedes the "not built
+this pass" framing at its end)</summary>
+
+CHERIoT's own paper (Amar et al., ACM SOSP '25, official, read in full again for this pass rather
+than re-quoting from memory) states its second design principle plainly: **"(P2) Fine-grained
+fault-tolerant compartments... A thread that encounters a fault... invokes the developer-provided
+error handler for that compartment. The handler might unwind the thread out of the compartment
+and/or micro-reboot it."** Critically, that handler is *"called by the switcher but executing in
+the context and with the rights of the compartment"* -- i.e. it runs bounded, with that ONE
+compartment's own capabilities, not with ambient system-wide authority. §5.1.2's own "Attacks on
+the error handler" paragraph names the residual risk honestly: *"A buggy error handler could
+incorrectly reset compartment state. Such a bug would not be exploitable by itself and require a
+chain of exploits... The reliance on correct error handling is fundamental to micro-reboots and
+error handling in general, not to CHERIoT."* -- i.e. CHERIoT accepts this risk, but the blast
+radius is bounded to the one faulting compartment's own rights, because the handler itself never
+runs with more privilege than that.
+
+**Checked directly against Veda-Core's own current trap-handling model, not assumed**: read
+`toolchain/sail-riscv/model/postlude/step_ext.sail`'s `handle_trap_extension` (Milestone 21) and
+`sail_tests/vc_syscall0_kernel.S`'s real `handler:` entry point (the most mature real trap-then
+-kernel-dispatch code this project has built). Confirmed: Milestone 21 resets `veda_pcc_length` to
+`VEDA_PCC_UNBOUNDED` on *every* real trap, unconditionally, before the trap vector (`mtvec`) is
+even fetched. `vc_syscall0_kernel.S`'s own `handler:` body -- full GPR save, syscall dispatch,
+`veda.bind`s against `KERNEL_SAVE_AREA`/`KERNEL_CONSOLE_BUF` -- runs start-to-finish with PCC
+unbounded; it never narrows itself into any bounded compartment before doing real work. This is a
+real, structural difference from CHERIoT's own model, not a naming coincidence: **Veda-Core has
+exactly one, global, ambient-authority trap handler (whatever `mtvec` points to) for every trap in
+the system, with no equivalent of CHERIoT's per-compartment, rights-scoped `error_handler()`.** A
+bug in Veda-Core's own trap-handling code today has an *unbounded* blast radius by construction --
+strictly larger than the residual risk CHERIoT itself names and accepts, since CHERIoT's own worst
+case is still scoped to one compartment's rights.
+
+**Honest sizing, not a quick fix**: this is not analogous to `VEDA_TRAP_QUARANTINE` (a bounded,
+single-mechanism, ~1-day addition to an existing chokepoint). Building a genuine Veda-Core
+equivalent of CHERIoT's P2 -- a compartment-local, capability-scoped fault-recovery convention,
+where a faulting compartment's own developer-provided handler runs bounded to that compartment's
+own rights rather than falling through to the single global unbounded handler -- is architecturally
+comparable in scope to OCInvoke/OCReturn/the switcher pattern itself: it needs a real design pass
+(where does the local handler's own capability come from; how does the switcher decide local
+-recovery vs. global fall-through; does this compose with the already-built OSpecialRW/SSC
+switcher machinery or need its own new mechanism) before any code, matching this project's own
+established discipline for genuinely new architectural surface (Milestone 13, Milestone 25, both
+Plan-Mode design passes before implementation). **Not built this pass** -- named here as a real,
+now-prioritized open question for the next dedicated design/research cycle, not silently dropped.
+
+</details>
+It is arguably the single most significant structural gap this session's research surfaced, more
+fundamental than either Tier 2 item below, because it is about the trust model of the mechanism
+this project's own security guarantees are built on top of, not a scaling or tooling limit.
+
 ---
 
 ## Part 4 -- Recommendation, reasoned, tiered
 
-**Tier 1 -- near-term, high leverage, closes a real, cited gap with a bounded, well-understood scope. Recommended as the actual next milestone.**
+**STATUS CORRECTION, 2026-08-19: this section is a historical planning record, not a live status board -- both items it names below are now CLOSED and were left unmarked here.** Tier 1 item 1 (`Length`/`Offset` widening, §2.8) shipped 2026-08-16/19. Tier 2 item 4 (`memcpy`/struct-assignment shadow propagation, §2.12) shipped 2026-08-19. §3.4 item 3 (repeated-trap DoS containment, `VEDA_TRAP_QUARANTINE`) also shipped 2026-08-19 on both Sail and RTL, plus a follow-on adversarial-review pass that found and fixed two further real gaps -- see `TRAP_QUARANTINE_DESIGN.md`/`TRAP_QUARANTINE_RESULTS.md`, not tracked as its own numbered section here since it was raised and closed within §3.4 itself. §3.5 (compartment-local, PCC-bounded fault recovery, `VEDA_LOCAL_HANDLER`) was found and closed on both Sail and RTL the same day it was raised, 2026-08-19, including a real critical cross-compartment collision bug found by adversarial review and fixed on both layers after both first reported "done" -- see `LOCAL_FAULT_RECOVERY_DESIGN.md`/`LOCAL_FAULT_RECOVERY_RESULTS.md`/`LOCAL_FAULT_RECOVERY_RTL_RESULTS.md`. Of everything below, the genuinely still-open items as of this correction are **Tier 2 item 3 (multi-hart RTL, §2.7)** and **Tier 2 item 2 (formal-verification/Coq maturity, §2.9 -- `coqc` re-confirmed not installed as of this correction)**, both explicitly blocked on external dependencies this project does not control alone, matching the reasoning already given for each below.
+
+**Tier 1 -- near-term, high leverage, closes a real, cited gap with a bounded, well-understood scope. Recommended as the actual next milestone at the time this was written.**
 1. `Length`/`Offset` compressed-bounds encoding -- §2.8. Of everything still open, this is the
    only item that is both small in design surface and already precisely specified: the honest
    16-bit cap documented in `VEDA_CORE_SPEC.md`'s own field table (`0`-`65,535` per object) has

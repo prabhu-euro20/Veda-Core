@@ -367,6 +367,51 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_cunseal_hibits_neg.vvp" "$SIM/veda_core.s
 echo "==> Simulating (Finding #2: CUnseal offset-hibits negative)"
 vvp "$SIM/sim_cunseal_hibits_neg.vvp" +elf_hex="$SIM/veda_smoke_cunseal_offset_hibits_neg.hex"
 
+echo "==> TRAP_QUARANTINE_DESIGN.md (task #351): Compiling (repeated-trap DoS containment, negative -- must hard-refuse after threshold)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_tq_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_trap_quarantine_neg.sv"
+echo "==> Simulating (trap quarantine: repeated-trap DoS negative)"
+vvp "$SIM/sim_tq_neg.vvp" +elf_hex="$SIM/veda_smoke_trap_quarantine_neg.hex"
+
+echo "==> TRAP_QUARANTINE_DESIGN.md (task #351): Compiling (decay earns forgiveness, positive -- must NOT be quarantined)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_tq_pos.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_trap_quarantine_decay_pos.sv"
+echo "==> Simulating (trap quarantine: decay positive)"
+vvp "$SIM/sim_tq_pos.vvp" +elf_hex="$SIM/veda_smoke_trap_quarantine_decay_pos.hex"
+
+echo "==> TRAP_QUARANTINE_RESULTS.md (adversarial RTL-mirror review): Compiling (eviction-starvation-bypass fix, positive -- a saturated table must never evict a quarantined victim)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_tq_starvation_pos.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_trap_quarantine_starvation_pos.sv"
+echo "==> Simulating (trap quarantine: eviction-starvation-bypass positive)"
+vvp "$SIM/sim_tq_starvation_pos.vvp" +elf_hex="$SIM/veda_smoke_trap_quarantine_starvation_pos.hex"
+
+echo "==> TRAP_QUARANTINE_RESULTS.md (adversarial RTL-mirror review): Compiling (veda_trap_quarantine_clear CSR 0x7C6 round trip, positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_tq_csr_clear_pos.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_trap_quarantine_csr_clear_pos.sv"
+echo "==> Simulating (trap quarantine: CSR clear positive)"
+vvp "$SIM/sim_tq_csr_clear_pos.vvp" +elf_hex="$SIM/veda_smoke_trap_quarantine_csr_clear_pos.hex"
+
+echo "==> LOCAL_FAULT_RECOVERY_DESIGN.md: Compiling (VEDA_LOCAL_HANDLER, positive -- redirect to registered handler, PCC preserved, clean OCRETURN exit)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_lh_pos.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_local_handler_pos.sv"
+echo "==> Simulating (local handler: positive)"
+vvp "$SIM/sim_lh_pos.vvp" +elf_hex="$SIM/veda_smoke_local_handler_pos.hex"
+
+echo "==> LOCAL_FAULT_RECOVERY_DESIGN.md: Compiling (VEDA_LOCAL_HANDLER, negative -- no handler registered, unchanged global fallback)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_lh_neg_no_handler.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_local_handler_neg_no_handler.sv"
+echo "==> Simulating (local handler: no-handler negative)"
+vvp "$SIM/sim_lh_neg_no_handler.vvp" +elf_hex="$SIM/veda_smoke_local_handler_neg_no_handler.hex"
+
+echo "==> LOCAL_FAULT_RECOVERY_DESIGN.md: Compiling (VEDA_LOCAL_HANDLER, negative -- quarantine-composition, self-faulting handler must be bounded)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_lh_neg_quarantine.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_local_handler_neg_quarantine.sv"
+echo "==> Simulating (local handler: quarantine-composition negative)"
+vvp "$SIM/sim_lh_neg_quarantine.vvp" +elf_hex="$SIM/veda_smoke_local_handler_neg_quarantine.hex"
+
+echo "==> LOCAL_FAULT_RECOVERY_DESIGN.md: Compiling (VEDA_LOCAL_HANDLER, negative -- confused-deputy bounds guard)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_lh_neg_bounds_guard.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_local_handler_neg_bounds_guard.sv"
+echo "==> Simulating (local handler: confused-deputy bounds-guard negative)"
+vvp "$SIM/sim_lh_neg_bounds_guard.vvp" +elf_hex="$SIM/veda_smoke_local_handler_neg_bounds_guard.hex"
+
+echo "==> LOCAL_FAULT_RECOVERY_DESIGN.md: Compiling (VEDA_LOCAL_HANDLER, negative -- cross-compartment handler-table collision via shared UNSEALED_OTYPE, real bug found by adversarial review)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_lh_neg_unsealed_otype.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_local_handler_neg_unsealed_otype.sv"
+echo "==> Simulating (local handler: shared-UNSEALED_OTYPE collision negative)"
+vvp "$SIM/sim_lh_neg_unsealed_otype.vvp" +elf_hex="$SIM/veda_smoke_local_handler_neg_unsealed_otype.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"
