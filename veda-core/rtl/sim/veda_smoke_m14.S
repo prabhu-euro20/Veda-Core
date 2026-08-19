@@ -12,7 +12,7 @@ _start:
     # widens it back. Fetch-time enforcement of these bounds (the actual
     # trap) is proven separately in veda_smoke_m14_neg.S.
     # ─────────────────────────────────────────────────────────────
-    csrr x9, 0x7c1                # pcc_length BEFORE any OCInvoke -- expect 0xFFFF
+    csrr x9, 0x7c1                # pcc_length BEFORE any OCInvoke -- expect 0xFFFFF
 
     # -- Object_ID=50 (CODE): Permit_Execute|Permit_Invoke=0x0402,
     #    Base=landing_pad, Length=0x0100. --
@@ -50,16 +50,17 @@ landing_pad:
     csrr x10, 0x7c0                # pcc_base AFTER OCInvoke -- expect landing_pad's own runtime address
     csrr x11, 0x7c1                # pcc_length AFTER OCInvoke -- expect 0x0100
 
-    # -- Object_ID=53 (return CODE): Base=return_pad, Length=0xFFFF
+    # -- Object_ID=53 (return CODE): Base=return_pad, Length=0xFFFFF
     #    (unbounded -- a real "return to the unconstrained caller
-    #    context" capability). --
+    #    context" capability). Plain VEDA_ODT_POPULATE's Length field is
+    #    16-bit-capped by design, so this uses VEDA_ODT_POPULATE_FAST +
+    #    veda_attr (0x7c4) to carry the real 20-bit Length. --
+    li   t1, 0xFFFFF0402           # veda_attr: Length=0xFFFFF, Perms=0x0402
+    csrw 0x7c4, t1
     la   t0, return_pad
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402
-    or   t0, t0, t1
     li   x1, 53
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2
 
     li   x1, 54
     li   x2, 0x8001090000400400
@@ -76,7 +77,7 @@ landing_pad:
     .insn r 0x5b, 0x1, 0x12, x0, x7, x8  # ocinvoke c7, c8   -- widens PCC back to unbounded
 
 return_pad:
-    csrr x12, 0x7c1                # pcc_length AFTER the return OCInvoke -- expect 0xFFFF again
+    csrr x12, 0x7c1                # pcc_length AFTER the return OCInvoke -- expect 0xFFFFF again
 
 1:
     j 1b

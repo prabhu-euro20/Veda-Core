@@ -113,7 +113,7 @@ generic_trap_handler:
     li   t4, 0x201                       # (cap_idx=16<<5)|cause=0x01 = 0x201
     bne  t3, t4, real_fail
     csrr t3, 0x7c1
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, real_fail
     li   x21, 0x600D
     j    done

@@ -119,7 +119,7 @@ trap_handler:
     la   t4, return_landing
     bne  t3, t4, fail
     csrr t3, 0x7c1               # veda_pcc_length -- expect VEDA_PCC_UNBOUNDED
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
 
     li   x21, 0x600D             # sentinel: handler reached with correct mcause/mtval/mepc/pcc_length

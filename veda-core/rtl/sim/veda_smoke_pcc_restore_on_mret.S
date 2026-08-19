@@ -119,7 +119,7 @@ resume2:
     csrr t3, 0x7c0
     bnez t3, fail                          # must be 0 (unbounded), not phase2_entry
     csrr t3, 0x7c1
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
     li   x25, 0x600D                       # Phase 2: explicit override honored
 
@@ -165,7 +165,7 @@ resume3:
     li   t4, 0x0048                        # matches the real, objdump-confirmed populate Length above
     bne  t3, t4, fail
     csrr t3, 0x7c3                         # mepcc_length must now be self-consumed (UNBOUNDED)
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
     li   x26, 0x600D                       # Phase 3: nested-trap staleness + repeatability, all correct
 
@@ -236,14 +236,14 @@ h_phase1_escape:
     csrr t3, mtval
     li   t4, 0x201
     bne  t3, t4, fail
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3                        # veda_mepcc_length := unbounded
     la   t3, phase2_setup
     csrw mepc, t3
     mret
 
 h_phase2:
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3                        # explicit override: clear mepcc_length
     csrr t3, mepc
     addi t3, t3, 4
@@ -301,7 +301,7 @@ h_phase3_inner:
     #    restore-triggering mret. --
     csrr s0, 0x7c2
     csrr s1, 0x7c3
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3
     csrr t3, mepc
     addi t3, t3, 4
@@ -320,7 +320,7 @@ h_phase3_exit:
     #    otherwise auto-restore would re-narrow PCC right back down to
     #    phase3_entry, and the fetch of all_done: itself (outside those
     #    bounds) would immediately re-trap. --
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3                        # veda_mepcc_length := unbounded
     la   t3, all_done
     csrw mepc, t3

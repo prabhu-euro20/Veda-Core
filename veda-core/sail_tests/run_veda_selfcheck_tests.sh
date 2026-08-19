@@ -38,7 +38,7 @@ for src in vc_*.S; do
     continue
   fi
 
-  out=$("$SIM" --config "$CFG" "$elf" 2>&1)
+  out=$(timeout 20 "$SIM" --config "$CFG" "$elf" 2>&1)
   code=$?
   if [ "$code" -eq 0 ] && echo "$out" | grep -q "SUCCESS"; then
     results+=("PASS      $name")

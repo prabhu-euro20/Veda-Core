@@ -77,7 +77,7 @@ trap_handler:
     #    unchanged) -- this fetch (trap_handler itself) is only
     #    reachable at all because of that. --
     csrr t4, 0x7c1
-    li   t5, 0xFFFF
+    li   t5, 0xFFFFF
     bne  t4, t5, fail
 
     li   x21, 0x600D                 # sentinel: reached the handler with the correct mcause/mtval, purecap still 0
@@ -91,7 +91,7 @@ trap_handler:
     # not a workaround -- matches the Sail side's own explicit-override
     # idiom (write mepcc_length, not the live pcc_length, to opt out of
     # the automatic restore).
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     csrw 0x7c3, t4                   # veda_mepcc_length := unbounded
 
     la   t4, recovery

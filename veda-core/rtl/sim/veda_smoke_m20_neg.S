@@ -10,7 +10,7 @@ _start:
     # Core's own 0x18) instead of silently succeeding and undoing the
     # compartment's own bounding. Proves the CSR's own value is
     # genuinely unaffected: after the trap's save-and-reset, it reads
-    # back exactly 0xFFFF (unbounded) -- neither the original narrow
+    # back exactly 0xFFFFF (unbounded) -- neither the original narrow
     # Length nor the attacker's own write value.
     # ─────────────────────────────────────────────────────────────
     la   t0, trap_handler
@@ -59,7 +59,7 @@ trap_handler:
     bne  t4, t5, fail
 
     csrr t4, 0x7c1                  # veda_pcc_length after the trap's own save-and-reset
-    li   t5, 0xFFFF                 # must be UNBOUNDED -- neither 0x40 (original) nor 0x1000 (attacker's value) persisted
+    li   t5, 0xFFFFF                # must be UNBOUNDED -- neither 0x40 (original) nor 0x1000 (attacker's value) persisted
     bne  t4, t5, fail
 
     li   x21, 0x600D                 # sentinel: reached the handler, self-escape genuinely blocked
@@ -68,7 +68,7 @@ trap_handler:
     # comment -- mepcc still holds this test's real narrow compartment
     # (Length=0x40), so an explicit clear is now required before mret to
     # avoid an auto-restore re-narrowing PCC right back down.
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     csrw 0x7c3, t4                   # veda_mepcc_length := unbounded
 
     la   t4, recovery

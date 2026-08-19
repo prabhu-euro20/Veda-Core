@@ -140,13 +140,16 @@ _start:
     .insn i 0x0b, 0x5, x8, x1, 0   # veda.bind c8, x1  -- thread_index, unsealed (permanent)
 
     # ══════════════ return-sentry SOURCE: Object_ID 130 ══════════════
+    # Length=0xFFFFF (VEDA_PCC_UNBOUNDED, 20-bit sentinel since the
+    # 2026-08-19 widening) -- plain VEDA_ODT_POPULATE's own 16-bit-capped
+    # Length field can never represent this value, so
+    # VEDA_ODT_POPULATE_FAST + veda_attr is required here.
+    li   t1, 0xFFFFF0002        # veda_attr: Length=0xFFFFF, Perms=0x0002
+    csrw 0x7c4, t1
     la   t0, after_scheduler_return
-    slli t0, t0, 32
-    li   t1, 0xFFFF0002
-    or   t0, t0, t1
     li   x1, 130
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2   # veda.odt.populate x5, x1, x2  -- return-sentry source
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2   # veda.odt.populate.fast x5, x1, x2  -- return-sentry source
 
     li   x1, 130
     .insn i 0x0b, 0x5, x9, x1, 0   # veda.bind c9, x1  -- return-sentry source, unsealed (permanent)

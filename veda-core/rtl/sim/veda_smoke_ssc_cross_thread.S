@@ -141,13 +141,25 @@ _start:
     .insn i 0x0b, 0x5, x8, x1, 0   # veda.bind c8, x1  -- thread_index, unsealed (permanent)
 
     # ══════════════ return-sentry SOURCE: Object_ID 122 ══════════════
+    # 2026-08-19 widening: Length=0xFFFF used to coincide exactly with
+    # the old 16-bit VEDA_PCC_UNBOUNDED sentinel, so OCReturn into this
+    # object left PCC genuinely unbounded (a happy accident). The new
+    # 20-bit sentinel is 0xFFFFF, which plain VEDA_ODT_POPULATE's own
+    # 16-bit-capped descriptor Length field can never represent -- so
+    # this object now needs VEDA_ODT_POPULATE_FAST + veda_attr (which
+    # carries the real 20-bit Length), matching the identical fix
+    # already established on the Sail side (sail_tests/vc_pcc_bounds.S).
+    # Without this, OCReturn narrows PCC to a real, finite 65535-byte
+    # compartment instead of unbounded, and the very next ordinary
+    # load/store in after_scheduler_return hard-traps on Milestone 19's
+    # own purecap-violation check (a live, non-unbounded compartment
+    # forbids ordinary loads/stores).
     la   t0, after_scheduler_return
-    slli t0, t0, 32
-    li   t1, 0xFFFF0002
-    or   t0, t0, t1
+    li   t1, 0xFFFFF0002           # veda_attr: Length=0xFFFFF, Perms=0x0002
+    csrw 0x7c4, t1
     li   x1, 122
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2   # veda.odt.populate x5, x1, x2  -- return-sentry source
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2   # veda.odt.populate.fast x5, x1, x2  -- return-sentry source
 
     li   x1, 122
     .insn i 0x0b, 0x5, x9, x1, 0   # veda.bind c9, x1  -- return-sentry source, unsealed (permanent)

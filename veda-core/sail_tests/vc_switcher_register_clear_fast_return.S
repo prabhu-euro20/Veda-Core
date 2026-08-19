@@ -41,15 +41,17 @@ _start:
     .insn i 0x0b, 0x5, x8, x1, 0  # veda.bind c8, x1  -- sentry-1 source, unsealed
     .insn r 0x5b, 0x1, 0x15, x9, x8, x0  # csealentry c9, c8  -- MINT sentry-1
 
-    # -- sentry-2 SOURCE (Object_ID=41): Base=exit_landing, Length=0xFFFF
-    #    (VEDA_PCC_UNBOUNDED), Perms=Execute. --
+    # -- sentry-2 SOURCE (Object_ID=41): Base=exit_landing, Length=0xFFFFF
+    #    (VEDA_PCC_UNBOUNDED, 20-bit sentinel since the 2026-08-19
+    #    widening), Perms=Execute. Plain VEDA_ODT_POPULATE's own 16-bit
+    #    -capped Length field can never represent this value, so
+    #    VEDA_ODT_POPULATE_FAST + veda_attr is required here. --
+    li   t1, 0xFFFFF0002        # veda_attr: Length=0xFFFFF, Perms=0x0002
+    csrw 0x7c4, t1
     la   t0, exit_landing
-    slli t0, t0, 32
-    li   t1, 0xFFFF0002
-    or   t0, t0, t1
     li   x1, 41
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2
 
     li   x1, 41
     .insn i 0x0b, 0x5, x10, x1, 0  # veda.bind c10, x1  -- sentry-2 source, unsealed

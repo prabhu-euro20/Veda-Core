@@ -17,17 +17,20 @@ _start:
     # own `mepc == return_landing` technique for distinguishing a real jump
     # from a coincidental fault).
 
-    # -- sentry SOURCE (Object_ID=90): Base=return_landing, Length=0xFFFF
-    #    (VEDA_PCC_UNBOUNDED), Perms=Execute only -- Permit_Invoke is not
-    #    needed, OCRETURN never checks it, by design. --
+    # -- sentry SOURCE (Object_ID=90): Base=return_landing, Length=0xFFFFF
+    #    (VEDA_PCC_UNBOUNDED, 20-bit sentinel since the 2026-08-19
+    #    widening), Perms=Execute only -- Permit_Invoke is not needed,
+    #    OCRETURN never checks it, by design. Plain VEDA_ODT_POPULATE's
+    #    own 16-bit-capped Length field can never represent this value
+    #    (NEXT_STEPS_ROADMAP.md "Break 3"), so VEDA_ODT_POPULATE_FAST +
+    #    veda_attr is required here. --
     la   t0, return_landing
     mv   x18, t0                # save the runtime Base for the later CSR-readback check
-    slli t0, t0, 32
-    li   t1, 0xFFFF0002
-    or   t0, t0, t1
+    li   t1, 0xFFFFF0002        # veda_attr: Length=0xFFFFF, Perms=0x0002
+    csrw 0x7c4, t1
     li   x1, 90
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2
 
     li   x1, 90
     .insn i 0x0b, 0x5, x8, x1, 0  # veda.bind c8, x1  -- sentry source, unsealed
@@ -76,7 +79,7 @@ return_landing:
     #    compartment boundary. --
     li   x20, 0x2222
     csrr t3, 0x7c1                        # veda_pcc_length
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
     csrr t3, 0x7c0                        # veda_pcc_base
     bne  t3, x18, fail

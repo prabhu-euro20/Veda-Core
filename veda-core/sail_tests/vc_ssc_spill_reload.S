@@ -95,17 +95,19 @@ do_exit:
     #    STACK_FRAME_CALL_RETURN_ANALYSIS.md / rtl/MILESTONE_22_RESULTS.md:
     #    "the compartment's own eventual exit back to its invoker must
     #    use a second, real OCInvoke, never OCJALR") into a code
-    #    capability whose own Length is VEDA_PCC_UNBOUNDED (0xFFFF)
-    #    widens PCC back to unbounded, exactly like returning to an
-    #    ordinary, non-compartmentalized caller -- only then is an
-    #    ordinary sw (inside the halt macro) safe again.
+    #    capability whose own Length is VEDA_PCC_UNBOUNDED (0xFFFFF,
+    #    20-bit sentinel since the 2026-08-19 widening) widens PCC back
+    #    to unbounded, exactly like returning to an ordinary, non
+    #    -compartmentalized caller -- only then is an ordinary sw
+    #    (inside the halt macro) safe again. Plain VEDA_ODT_POPULATE's
+    #    own 16-bit-capped Length field can never represent this value,
+    #    so VEDA_ODT_POPULATE_FAST + veda_attr is required here.
+    li   t1, 0xFFFFF0402   # veda_attr: Length=0xFFFFF (unbounded), Perms=0x0402
+    csrw 0x7c4, t1
     la   t0, exit_point
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402   # Length=0xFFFF (unbounded), Perms=0x0402 (Execute|Invoke)
-    or   t0, t0, t1
     li   x1, 224
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2  -- exit CODE
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2  -- exit CODE
 
     li   x1, 225
     li   x2, 0x8001090000400400

@@ -26,12 +26,12 @@ module tb;
       cyc_cnt = cyc_cnt + 1;
     end
 
-    $display("handler reached   : x21=0x%0h (must be 0x600D -- mcause=0x02, veda_pcc_length back to 0xFFFF)", dut.CPU_Xreg_val_a0[21]);
+    $display("handler reached   : x21=0x%0h (must be 0x600D -- mcause=0x02, veda_pcc_length back to 0xFFFFF)", dut.CPU_Xreg_val_a0[21]);
     $display("resumed after MRET: x22=0x%0h (must be 0x900D)", dut.CPU_Xreg_val_a0[22]);
 
     if (dut.CPU_Xreg_val_a0[21] == 64'h600D &&
         dut.CPU_Xreg_val_a0[22] == 64'h900D) begin
-      $display("\n*** TEST PASSED *** (from inside a live OCInvoke compartment, an ordinary CSRRW to veda_pcc_length genuinely hard-traps -- mcause=0x02, standard RISC-V Illegal_Instruction, not Veda-Core's own 0x18 -- and the CSR's own value is provably unaffected: it reads back exactly 0xFFFF/unbounded afterward, neither the original narrow Length nor the attacker's own write value. The real, empirically-confirmed compartment-state CSR self-escape is closed)");
+      $display("\n*** TEST PASSED *** (from inside a live OCInvoke compartment, an ordinary CSRRW to veda_pcc_length genuinely hard-traps -- mcause=0x02, standard RISC-V Illegal_Instruction, not Veda-Core's own 0x18 -- and the CSR's own value is provably unaffected: it reads back exactly 0xFFFFF/unbounded afterward, neither the original narrow Length nor the attacker's own write value. The real, empirically-confirmed compartment-state CSR self-escape is closed)");
     end else begin
       $display("\n*** TEST FAILED ***");
     end

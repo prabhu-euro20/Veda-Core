@@ -134,13 +134,17 @@ target_entry:
     #    capabilities) are no longer needed past this point and are
     #    reused here as scratch, mirroring this file's own existing
     #    economical-register-reuse convention. --
+    # Length=0xFFFFF (VEDA_PCC_UNBOUNDED, 20-bit sentinel since the
+    # 2026-08-19 widening), Perms=0x0402 (Execute|Invoke) -- plain
+    # VEDA_ODT_POPULATE's own 16-bit-capped Length field can never
+    # represent this value, so VEDA_ODT_POPULATE_FAST + veda_attr is
+    # required here.
+    li   t1, 0xFFFFF0402        # veda_attr: Length=0xFFFFF, Perms=0x0402
+    csrw 0x7c4, t1
     la   t0, return_pad
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402        # Length=0xFFFF (VEDA_PCC_UNBOUNDED), Perms=0x0402 (Execute|Invoke)
-    or   t0, t0, t1
     li   x1, 40
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2  -- RETURN CODE
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2  -- RETURN CODE
 
     li   x1, 41
     li   x2, 0x8004090000400400

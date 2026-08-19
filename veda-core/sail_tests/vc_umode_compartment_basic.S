@@ -132,7 +132,7 @@ h_phase4:
     # fired correctly for a trap DELEGATED FROM U-mode, not just from
     # M-mode as every prior test exercised.
     csrr t3, 0x7c1                 # veda_pcc_length -- expect VEDA_PCC_UNBOUNDED
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
 
     li   x23, 0x600D               # phase 4 confirmed: U-mode ecall + universal PCC reset both correct

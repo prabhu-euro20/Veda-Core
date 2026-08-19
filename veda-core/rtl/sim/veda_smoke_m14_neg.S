@@ -85,7 +85,7 @@ trap_handler:
 
     # -- explicit recovery: abandon the compartment, restore unbounded,
     #    resume at a real, safe address outside it. --
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c1, t3                 # veda_pcc_length := unbounded
     csrw 0x7c0, x0                 # veda_pcc_base := 0 (irrelevant once length is unbounded)
     # RTL M21-restore mirror (MILESTONE_21_RESTORE_RTL_RESULTS.md): mret
@@ -97,13 +97,13 @@ trap_handler:
     # mret below. Clearing mepcc_length too is the real, now-correct
     # override idiom -- matches the Sail side's own explicit-override
     # test property (vc_pcc_auto_restore_on_mret.S) exactly.
-    csrw 0x7c3, t3                 # veda_mepcc_length := unbounded (t3 still 0xFFFF)
+    csrw 0x7c3, t3                 # veda_mepcc_length := unbounded (t3 still 0xFFFFF)
     la   t3, recovery
     csrw mepc, t3
     mret
 
 recovery:
-    csrr x23, 0x7c1                # pcc_length AFTER the explicit restore -- expect 0xFFFF
+    csrr x23, 0x7c1                # pcc_length AFTER the explicit restore -- expect 0xFFFFF
     li   x22, 0x900D               # sentinel: correctly resumed at the real recovery point
     j    done
 

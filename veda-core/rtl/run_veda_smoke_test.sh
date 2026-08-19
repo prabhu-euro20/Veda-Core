@@ -327,6 +327,46 @@ iverilog -g2012 -I "$SIM" -o "$SIM/sim_wfi.vvp" "$SIM/veda_core.sv" "$SIM/tb_ved
 echo "==> Simulating (WFI NOP decode)"
 vvp "$SIM/sim_wfi.vvp" +elf_hex="$SIM/veda_smoke_wfi_nop.hex"
 
+echo "==> Length/Offset widening: Compiling (positive, >64KB object via veda.odt.populate.fast+veda_attr, round trip at the real widened edge)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_widened_bounds.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_widened_bounds.sv"
+echo "==> Simulating (Length/Offset widening: widened bounds positive)"
+vvp "$SIM/sim_widened_bounds.vvp" +elf_hex="$SIM/veda_smoke_widened_bounds.hex"
+
+echo "==> Length/Offset widening: Compiling (negative, 4 bytes past the real widened Length must hard-trap)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_widened_bounds_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_widened_bounds_neg.sv"
+echo "==> Simulating (Length/Offset widening: widened bounds negative)"
+vvp "$SIM/sim_widened_bounds_neg.vvp" +elf_hex="$SIM/veda_smoke_widened_bounds_neg.hex"
+
+echo "==> Length/Offset widening: Compiling (OCL.C/OCS.C new 32-byte alignment gate, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_oclc_align_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_oclc_alignment_neg.sv"
+echo "==> Simulating (Length/Offset widening: OCL.C/OCS.C alignment negative)"
+vvp "$SIM/sim_oclc_align_neg.vvp" +elf_hex="$SIM/veda_smoke_oclc_alignment_neg.hex"
+
+echo "==> Length/Offset widening: Compiling (2-granule tag-store adjacency, both directions)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_oclc_granule_adj.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_oclc_granule_adjacency.sv"
+echo "==> Simulating (Length/Offset widening: OCL.C/OCS.C granule adjacency)"
+vvp "$SIM/sim_oclc_granule_adj.vvp" +elf_hex="$SIM/veda_smoke_oclc_granule_adjacency.hex"
+
+echo "==> Length/Offset widening: Compiling (CSeal otype-truncation precondition, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_cseal_hibits_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_cseal_offset_hibits_neg.sv"
+echo "==> Simulating (Length/Offset widening: CSeal offset-hibits negative)"
+vvp "$SIM/sim_cseal_hibits_neg.vvp" +elf_hex="$SIM/veda_smoke_cseal_offset_hibits_neg.hex"
+
+echo "==> Length/Offset widening: Compiling (CSetBounds full-width window check, negative + widened-success positive)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_csetbounds_widthcheck_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_csetbounds_widthcheck_neg.sv"
+echo "==> Simulating (Length/Offset widening: CSetBounds full-width window check negative + widened-success positive)"
+vvp "$SIM/sim_csetbounds_widthcheck_neg.vvp" +elf_hex="$SIM/veda_smoke_csetbounds_widthcheck_neg.hex"
+
+echo "==> Adversarial-review Finding #1: Compiling (widened capability round trip through OCS.C/OCL.C's 136-bit pack)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_oclc_widened_roundtrip.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_oclc_widened_roundtrip.sv"
+echo "==> Simulating (Finding #1: OCL.C/OCS.C widened round trip)"
+vvp "$SIM/sim_oclc_widened_roundtrip.vvp" +elf_hex="$SIM/veda_smoke_oclc_widened_roundtrip.hex"
+
+echo "==> Adversarial-review Finding #2: Compiling (CUnseal's own widened-otype compare site, negative)"
+iverilog -g2012 -I "$SIM" -o "$SIM/sim_cunseal_hibits_neg.vvp" "$SIM/veda_core.sv" "$SIM/tb_veda_smoke_cunseal_offset_hibits_neg.sv"
+echo "==> Simulating (Finding #2: CUnseal offset-hibits negative)"
+vvp "$SIM/sim_cunseal_hibits_neg.vvp" +elf_hex="$SIM/veda_smoke_cunseal_offset_hibits_neg.hex"
+
 echo "==> Regression: base RV64I 81-instruction smoke test (unmodified)"
 iverilog -g2012 -I "$SIM" -o "$SIM/sim_base.vvp" "$SIM/veda_core.sv" "$SIM/tb_smoke.sv"
 vvp "$SIM/sim_base.vvp"

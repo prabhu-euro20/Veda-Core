@@ -40,7 +40,12 @@
    //  Milestone 12 addition, byte offset +10, one of the six previously-
    //  spare bytes in this 16-byte window) = 88 bits used of 128
    //  available, same byte-addressable-array convention already used
-   //  for elfmem/dmem below, not a new idiom.
+   //  for elfmem/dmem below, not a new idiom. Milestone 15 (Object_ID hi
+   //  bits, +11/+12) and Milestone 16 (retired, 1 bit of +13) each later
+   //  consumed one more previously-spare byte. Length widened 16->20
+   //  bits, 2026-08-19 (mirrors veda_types.sail's odt_entry.Length) --
+   //  the extra 4 bits reuse byte +14's low nibble, the same spare-byte-
+   //  reuse idiom; only +15 remains fully spare after this pass.
    // ───────────────────────────────────────────────────────────────────
    localparam bit [31:0] ODT_BASE = 32'h9000_0000;
    localparam int ODT_ENTRIES = 256;
@@ -617,17 +622,19 @@
          //  throughout this file, e.g. $veda_trap_taken referenced here
          //  before its own definition too) hold the currently-active
          //  compartment's own bounds, narrowed away from
-         //  VEDA_PCC_UNBOUNDED (16'hFFFF, the reset/no-compartment
-         //  sentinel) only by a successful OCInvoke. This check is
-         //  genuinely unconditional, every cycle, against the CURRENT
-         //  $pc -- distinct in kind from every other check in this file,
-         //  none of which are gated on a decoded opcode; Sail's own
-         //  mirror (postlude/step_ext.sail's ext_fetch_check_pc) is
-         //  identically unconditional, called before every fetch.
+         //  VEDA_PCC_UNBOUNDED (20'hFFFFF, the reset/no-compartment
+         //  sentinel -- widened from 16'hFFFF alongside capability
+         //  Length/Offset, 2026-08-19) only by a successful OCInvoke.
+         //  This check is genuinely unconditional, every cycle, against
+         //  the CURRENT $pc -- distinct in kind from every other check
+         //  in this file, none of which are gated on a decoded opcode;
+         //  Sail's own mirror (postlude/step_ext.sail's
+         //  ext_fetch_check_pc) is identically unconditional, called
+         //  before every fetch.
          // ─────────────────────────────────────────────────────────
-         $veda_pcc_violation = ($veda_pcc_length != 16'hFFFF) &&
+         $veda_pcc_violation = ($veda_pcc_length != 20'hFFFFF) &&
                                 (($pc[31:0] < $veda_pcc_base) ||
-                                 ($pc[31:0] >= ($veda_pcc_base + {16'b0, $veda_pcc_length})));
+                                 ($pc[31:0] >= ($veda_pcc_base + {12'b0, $veda_pcc_length})));
 
          // ─────────────────────────────────────────────────────────
          //  INSTRUCTION MEMORY — Milestone A/B hand-assembled ROM[]
@@ -1050,7 +1057,15 @@
          $veda_dram_stall_req =
             !$veda_pcc_violation && !(>>1$veda_dram_busy) &&
             ((($is_veda_bind_plain || $is_veda_bind_notrap || $is_veda_rebind) && !$veda_odt_tcm_hit && !$veda_bind_trap) ||
-             (($is_veda_ocl_c || $is_veda_ocs_c) && !$veda_capmem_tcm_hit && !$veda_oclc_violation && !$veda_ocsc_violation));
+             (($is_veda_ocl_c || $is_veda_ocs_c) && !$veda_capmem_tcm_hit && !$veda_oclc_violation && !$veda_ocsc_violation &&
+              // NEW (2026-08-19 widening): the new alignment-violation
+              // signals must join this guard for the identical R21 reason
+              // the tag/seal/perm/bounds violations already do above --
+              // both are only ever true on a path that traps anyway via
+              // $veda_trap_taken's own OR-list, so this can only REMOVE a
+              // stall, never create one (same strictly-monotone argument
+              // the original R21 fix's own comment makes).
+              !$veda_oclc_align_violation && !$veda_ocsc_align_violation));
          // Same-cycle load (NOT >>1$veda_dram_stall_req) -- loading on the
          // >>1-delayed request would add one extra spurious cycle before
          // the counter reflects the real remaining wait, the exact
@@ -1253,7 +1268,13 @@
          $veda_odt_idx[7:0]    = $veda_object_id[7:0];
          $veda_odt_addr[31:0]  = ODT_BASE + ({24'b0, $veda_odt_idx} * 32'd16);
          $veda_odt_base[31:0]   = {odt_mem[$veda_odt_addr+3], odt_mem[$veda_odt_addr+2], odt_mem[$veda_odt_addr+1], odt_mem[$veda_odt_addr+0]};
-         $veda_odt_length[15:0] = {odt_mem[$veda_odt_addr+5], odt_mem[$veda_odt_addr+4]};
+         // Length widened 16->20 bits, 2026-08-19 (mirrors veda_types.sail's
+         // odt_entry.Length). The extra 4 bits reuse byte +14, previously
+         // fully spare -- the same "consume a previously-unused spare byte
+         // of this same 16-byte struct" convention Milestone 15 (+11/+12)
+         // and Milestone 16 (+13) already established here. 15 of 16
+         // bytes are now used; +15 remains spare.
+         $veda_odt_length[19:0] = {odt_mem[$veda_odt_addr+14][3:0], odt_mem[$veda_odt_addr+5], odt_mem[$veda_odt_addr+4]};
          $veda_odt_perms[15:0]  = {odt_mem[$veda_odt_addr+7], odt_mem[$veda_odt_addr+6]};
          $veda_odt_gen[7:0]     = odt_mem[$veda_odt_addr+8];
          // RTL MILESTONE 15: the low-8-bit ODT index above aliases any
@@ -1449,8 +1470,16 @@
          // valid/generation actually change).
          $veda_odtpd_new_base[31:0]   = $is_veda_odt_populate      ? $rs2_data[63:32] :
                                           $is_veda_odt_populate_fast ? $rs2_data[31:0]  : $veda_odt_base;
-         $veda_odtpd_new_length[15:0] = $is_veda_odt_populate      ? $rs2_data[31:16] :
-                                          $is_veda_odt_populate_fast ? $veda_attr[31:16] : $veda_odt_length;
+         // Plain Populate's descriptor keeps its existing 16-bit Length
+         // slice (descriptor[31:16]), unchanged encoding, still capped at
+         // 64KiB by design (NEXT_STEPS_ROADMAP.md "Break 3", mirrors
+         // veda_ocl_insts.sail's VEDA_ODT_POPULATE) -- explicitly
+         // zero-extended into the new 20-bit field, matching Sail's own
+         // zero_extend(descriptor[31..16]). Populate-Fast reads the real
+         // 20-bit Length straight from the widened $veda_attr[35:16]
+         // (2026-08-19 widening, mirrors veda_attr[35..16] in Sail).
+         $veda_odtpd_new_length[19:0] = $is_veda_odt_populate      ? {4'b0, $rs2_data[31:16]} :
+                                          $is_veda_odt_populate_fast ? $veda_attr[35:16]        : $veda_odt_length;
          $veda_odtpd_new_perms[15:0]  = $is_veda_odt_populate      ? $rs2_data[15:0]  :
                                           $is_veda_odt_populate_fast ? $veda_attr[15:0]  : $veda_odt_perms;
          // Only consumed by the trailing raw \SV always_ff block below
@@ -1547,7 +1576,16 @@
             // real bytes a real OCS.C (or nothing at all, if never
             // written) put there -- not from any other capability
             // register.
+            // NEW (2026-08-19 widening): !|cpu>>1$veda_oclc_align_violation
+            // added -- the identical violation-suppresses-write convention
+            // already applied to $veda_oclc_violation just above, now
+            // extended to the new 32-byte-alignment violation so a
+            // misaligned OCL.C cannot commit whatever bytes happen to sit
+            // at the unaligned address (plus whatever the tag store
+            // happens to report there) into the destination capability
+            // register before the trap redirect takes effect.
             $oclc_wr_en = |cpu>>1$is_veda_ocl_c && !|cpu>>1$veda_oclc_violation &&
+                          !|cpu>>1$veda_oclc_align_violation &&
                           (|cpu>>1$veda_rd_cap == #vreg);
             // RTL Milestone 10: OCInvoke's own write source -- a
             // genuinely different KIND of write-enable from every one
@@ -1648,7 +1686,11 @@
                           $ospecialrw_wr_en ? (|cpu>>1$veda_ospecialrw_scr_is_tsc ? |cpu>>1$veda_tsc_base : |cpu>>1$veda_ospecialrw_scr_is_ssc ? |cpu>>1$veda_ssc_base : |cpu>>1$veda_oda_base) :
                           $csealentry_wr_en ? |cpu>>1$veda_rs1cap_base :
                                               $RETAIN;
-            $length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+            // Length widened 16->20 bits, 2026-08-19 (mirrors veda_types.sail's
+            // capability.Length: bits(16)->bits(20), NEXT_STEPS_ROADMAP.md
+            // "DECIDED, 2026-08-19"). Every RHS source below is independently
+            // widened to 20 bits at its own declaration site.
+            $length[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                             $bind_wr_en       ? |cpu>>1$veda_odt_length :
                             ($rebind_wr_en && |cpu>>1$veda_rebind_ok) ? |cpu>>1$veda_odt_length :
                             $oca_wr_en        ? |cpu>>1$veda_rs1cap_length :
@@ -1681,10 +1723,12 @@
             // own real unsealCap() only ever clears otype, every other
             // field (including the cursor) carries over exactly as it
             // was in the sealed capability.
-            $offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
-                            $bind_wr_en       ? 16'b0 :
-                            $oca_wr_en        ? |cpu>>1$veda_oca_sum[15:0] :
-                            $csetbounds_wr_en ? 16'b0 :
+            // Offset widened 16->20 bits, 2026-08-19 (mirrors veda_types.sail's
+            // capability.Offset: bits(16)->bits(20)).
+            $offset[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
+                            $bind_wr_en       ? 20'b0 :
+                            $oca_wr_en        ? |cpu>>1$veda_oca_sum[19:0] :
+                            $csetbounds_wr_en ? 20'b0 :
                             ($cseal_wr_en || $cunseal_wr_en) ? |cpu>>1$veda_rs1cap_offset :
                             $oclc_wr_en       ? |cpu>>1$veda_oclc_unpacked_offset :
                             $ocinvoke_wr_en   ? |cpu>>1$veda_cs2_offset :
@@ -1727,7 +1771,16 @@
                            $bind_wr_en ? 16'hFFFF :
                            ($rebind_wr_en && |cpu>>1$veda_rebind_ok) ? 16'hFFFF :
                            ($oca_wr_en || $csetbounds_wr_en) ? |cpu>>1$veda_rs1cap_otype :
-                           $cseal_wr_en   ? |cpu>>1$veda_cs2_offset :
+                           // WIDENING: |cpu>>1$veda_cs2_offset is now 20 bits;
+                           // otype stays 16 bits (veda_types.sail) -- this is
+                           // now a real, explicit narrowing slice, mirroring
+                           // veda_cap_insts.sail's own VEDA_CSEAL field
+                           // literal `otype = cs2.Offset[15..0]`. Written
+                           // unconditionally (Tag alone is gated by
+                           // $veda_cseal_ok below) -- the same "always write
+                           // fields, conditionally clear tag" pattern already
+                           // used throughout this mux.
+                           $cseal_wr_en   ? |cpu>>1$veda_cs2_offset[15:0] :
                            $cunseal_wr_en ? 16'hFFFF :
                            $oclc_wr_en    ? |cpu>>1$veda_oclc_unpacked_otype :
                            $ocinvoke_wr_en ? 16'hFFFF :
@@ -1780,7 +1833,7 @@
          // ─────────────────────────────────────────────────────────
          $veda_rs1cap_tag           = /vreg[$veda_ocl_ocs_rs1_cap]$tag;
          $veda_rs1cap_base[31:0]    = /vreg[$veda_ocl_ocs_rs1_cap]$base;
-         $veda_rs1cap_length[15:0]  = /vreg[$veda_ocl_ocs_rs1_cap]$length;
+         $veda_rs1cap_length[19:0]  = /vreg[$veda_ocl_ocs_rs1_cap]$length;
          $veda_rs1cap_perms[15:0]   = /vreg[$veda_ocl_ocs_rs1_cap]$perms;
          $veda_rs1cap_otype[15:0]   = /vreg[$veda_ocl_ocs_rs1_cap]$otype;
          $veda_rs1cap_object_id[22:0] = /vreg[$veda_ocl_ocs_rs1_cap]$object_id;
@@ -1790,7 +1843,7 @@
          // capability's own persistent one), so it never got promoted to
          // a top-level signal at all -- OCA/NMC_ADD/Veda-Atomic all need
          // it, so it's added here.
-         $veda_rs1cap_offset[15:0] = /vreg[$veda_ocl_ocs_rs1_cap]$offset;
+         $veda_rs1cap_offset[19:0] = /vreg[$veda_ocl_ocs_rs1_cap]$offset;
 
          // Generation re-check: a fresh, independent ODT lookup by the
          // *capability's own cached* Object_ID (distinct from Bind's own
@@ -1820,7 +1873,7 @@
          $veda_sealed        = ($veda_rs1cap_otype != 16'hFFFF);
          $veda_perm_load_ok  = $veda_rs1cap_perms[2];
          $veda_perm_store_ok = $veda_rs1cap_perms[3];
-         $veda_bounds_ok     = (($rs2_data + 64'd8) <= {48'b0, $veda_rs1cap_length});
+         $veda_bounds_ok     = (($rs2_data + 64'd8) <= {44'b0, $veda_rs1cap_length});
 
          $veda_ocl_violation = $is_veda_ocl && (!$veda_rs1cap_tag || $veda_gen_stale || $veda_sealed || !$veda_perm_load_ok || !$veda_bounds_ok);
          $veda_ocs_violation = $is_veda_ocs && (!$veda_rs1cap_tag || $veda_gen_stale || $veda_sealed || !$veda_perm_store_ok || !$veda_bounds_ok);
@@ -1847,18 +1900,45 @@
          `BOGUS_USE($veda_ocs_value)
 
          // ─────────────────────────────────────────────────────────
-         //  VEDA-CORE RTL MILESTONE 7: OCL.C/OCS.C checks. Real, own
-         //  16-byte (128-bit) bounds check -- deliberately NOT sharing
+         //  VEDA-CORE RTL MILESTONE 7 (widened 2026-08-19, Length/Offset
+         //  20-bit mirror): OCL.C/OCS.C checks. Real, own 17-byte
+         //  (136-bit) bounds check -- deliberately NOT sharing
          //  $veda_bounds_ok above, which is hardcoded to the 8-byte
          //  D-width. Same real_addr computation as OCL.D/OCS.D
          //  ($veda_real_addr, already computed above: rs1cap.Base +
          //  fresh GPR offset) -- the capability width doesn't change
          //  where the access lands, only how many bytes/whether the tag
-         //  store is touched.
+         //  store is touched. 16 -> 17 mirrors veda_ocl_insts.sail's own
+         //  veda_check_access(capidx, offset, 17, ...) call for both
+         //  VEDA_OCL_C/VEDA_OCS_C.
          // ─────────────────────────────────────────────────────────
-         $veda_oclc_bounds_ok = (($rs2_data + 64'd16) <= {48'b0, $veda_rs1cap_length});
+         $veda_oclc_bounds_ok = (($rs2_data + 64'd17) <= {44'b0, $veda_rs1cap_length});
          $veda_oclc_violation = $is_veda_ocl_c && (!$veda_rs1cap_tag || $veda_gen_stale || $veda_sealed || !$veda_perm_load_ok  || !$veda_oclc_bounds_ok);
          $veda_ocsc_violation = $is_veda_ocs_c && (!$veda_rs1cap_tag || $veda_gen_stale || $veda_sealed || !$veda_perm_store_ok || !$veda_oclc_bounds_ok);
+
+         // ─────────────────────────────────────────────────────────
+         //  NEW (2026-08-19 widening): 32-byte alignment requirement,
+         //  real Sail/RTL parity with the decided RTL tag-store design
+         //  (NEXT_STEPS_ROADMAP.md's own "DECIDED, 2026-08-19"
+         //  tag-granule-reversal section) -- the precondition that lets a
+         //  17-byte capability-store touch exactly 2 statically-known-
+         //  ADJACENT 16-byte tag_mem[]/tcm_scratch_tag[] granules (idx,
+         //  idx+1, computed below) with no runtime-variable-span
+         //  arithmetic. Checked only when the existing tag/gen/seal/perm/
+         //  bounds check above ALREADY passed -- mirrors
+         //  veda_ocl_insts.sail's own VEDA_OCL_C/VEDA_OCS_C execute
+         //  clauses exactly: alignment is tested only after
+         //  veda_check_access already returned Ok(paddr), so a
+         //  misaligned-AND-otherwise-invalid access reports its first
+         //  real violation, never alignment. Address-only (not load-vs-
+         //  store-specific): both OCL.C and OCS.C need the identical
+         //  check on the identical $veda_real_addr. Cause =
+         //  VEDA_CAUSE_ALIGNMENT_VIOLATION = 5'h08, wired into
+         //  $veda_trap_taken/$veda_trap_cause further below.
+         // ─────────────────────────────────────────────────────────
+         $veda_oclc_ocsc_misaligned = ($veda_real_addr[4:0] != 5'b00000);
+         $veda_oclc_align_violation = $is_veda_ocl_c && !$veda_oclc_violation && $veda_oclc_ocsc_misaligned;
+         $veda_ocsc_align_violation = $is_veda_ocs_c && !$veda_ocsc_violation && $veda_oclc_ocsc_misaligned;
 
          // Tag-store granule index: $veda_real_addr is absolute
          // (ELFMEM_BASE-relative), tag_mem[] is declared 0-based
@@ -1869,6 +1949,16 @@
          // power of two -- the same technique already used in the Sail
          // model's own tag-store index computation, byte_off >> 4).
          $veda_capmem_granule[31:0] = ($veda_real_addr[31:0] - ELFMEM_BASE) >> 4;
+         // NEW (2026-08-19 widening): the capability's own SECOND
+         // granule. A 17-byte OCL.C/OCS.C access, now hard-required to be
+         // 32-byte aligned (above), always spans exactly 2 adjacent
+         // 16-byte granules (idx, idx+1), never more -- tag granule size
+         // stays unchanged at 16 bytes by explicit decision
+         // (NEXT_STEPS_ROADMAP.md's "DECIDED, 2026-08-19" reversal), so
+         // this is a bare +1, not a runtime-variable-span computation.
+         // Mirrors mem_metadata.sail's own __WriteRAM_Meta/__ReadRAM_Meta
+         // g0/g1 fix ("the real index of the access's own last byte too").
+         $veda_capmem_granule2[31:0] = $veda_capmem_granule + 32'd1;
 
          // MILESTONE 24 Stage 3: OCL.C/OCS.C's own TCM routing decision --
          // a real, separate address-range check on $veda_real_addr
@@ -1885,6 +1975,13 @@
          $veda_capmem_tcm_hit = ($veda_real_addr[31:0] >= TCM_SCRATCH_BASE) &&
                                  ($veda_real_addr[31:0] <  (TCM_SCRATCH_BASE + TCM_SCRATCH_SIZE));
          $veda_capmem_tcm_granule[31:0] = ($veda_real_addr[31:0] - TCM_SCRATCH_BASE) >> 4;
+         // NEW (2026-08-19 widening): the TCM-tier's own second granule,
+         // same real reason/1-adjacent-granule property as
+         // $veda_capmem_granule2 above, kept as its own separate signal
+         // (never shared with the elfmem-tier one) for the identical real
+         // reason $veda_capmem_tcm_granule itself is already kept
+         // separate from $veda_capmem_granule.
+         $veda_capmem_tcm_granule2[31:0] = $veda_capmem_tcm_granule + 32'd1;
 
          // ─────────────────────────────────────────────────────────
          //  VEDA-CORE RTL MILESTONE 7: byte-granular tag invalidation --
@@ -1905,21 +2002,22 @@
 
          // OCS.C's own store source: rd is a Capability Register here
          // (Section 1's own field-position-reuse idiom, same as every
-         // other Custom-0/2 instruction), not a GPR -- pack its 128 data
-         // bits in the identical field order the Sail model uses
+         // other Custom-0/2 instruction), not a GPR -- pack its 136 data
+         // bits (widened from 128, 2026-08-19, Length/Offset 16->20 bits
+         // each) in the identical field order the Sail model uses
          // (veda_cap_pack: Object_ID @ Base @ Length @ Offset @ Perms @
          // otype @ Reserved @ 1'b0 padding), so both real, independent
          // implementations of this ISA agree on one real memory layout,
          // not two silently different ones.
          $veda_ocsc_store_cap_object_id[22:0] = /vreg[$veda_rd_cap]$object_id;
          $veda_ocsc_store_cap_base[31:0]      = /vreg[$veda_rd_cap]$base;
-         $veda_ocsc_store_cap_length[15:0]    = /vreg[$veda_rd_cap]$length;
-         $veda_ocsc_store_cap_offset[15:0]    = /vreg[$veda_rd_cap]$offset;
+         $veda_ocsc_store_cap_length[19:0]    = /vreg[$veda_rd_cap]$length;
+         $veda_ocsc_store_cap_offset[19:0]    = /vreg[$veda_rd_cap]$offset;
          $veda_ocsc_store_cap_perms[15:0]     = /vreg[$veda_rd_cap]$perms;
          $veda_ocsc_store_cap_otype[15:0]     = /vreg[$veda_rd_cap]$otype;
          $veda_ocsc_store_cap_reserved[7:0]   = /vreg[$veda_rd_cap]$reserved;
          $veda_ocsc_store_tag                 = /vreg[$veda_rd_cap]$tag;
-         $veda_ocsc_packed[127:0] = {$veda_ocsc_store_cap_object_id, $veda_ocsc_store_cap_base,
+         $veda_ocsc_packed[135:0] = {$veda_ocsc_store_cap_object_id, $veda_ocsc_store_cap_base,
                                       $veda_ocsc_store_cap_length, $veda_ocsc_store_cap_offset,
                                       $veda_ocsc_store_cap_perms, $veda_ocsc_store_cap_otype,
                                       $veda_ocsc_store_cap_reserved, 1'b0};
@@ -1946,8 +2044,10 @@
          // "negative" needs no $signed() cast, avoiding the real
          // misparse issue already documented and fixed once in this
          // project (the `$` sigil collides with TL-Verilog's own syntax).
-         $veda_oca_sum[63:0] = {48'b0, $veda_rs1cap_offset} + $rs2_data;
-         $veda_oca_out_of_range = $veda_oca_sum[63] || ($veda_oca_sum >= {48'b0, $veda_rs1cap_length});
+         // 2026-08-19 widening: cap.Offset/cap.Length are now 20 bits, so
+         // zero-extension to 64 bits needs 44 zero bits, not 48.
+         $veda_oca_sum[63:0] = {44'b0, $veda_rs1cap_offset} + $rs2_data;
+         $veda_oca_out_of_range = $veda_oca_sum[63] || ($veda_oca_sum >= {44'b0, $veda_rs1cap_length});
          $veda_oca_ok = $veda_rs1cap_tag && !$veda_oca_out_of_range && ($veda_rs1cap_otype == 16'hFFFF);
 
          // ─────────────────────────────────────────────────────────
@@ -1957,12 +2057,12 @@
          // ─────────────────────────────────────────────────────────
          $veda_capquery_result[63:0] =
             $is_veda_cgetbase   ? {32'b0, $veda_rs1cap_base} :
-            $is_veda_cgetlen    ? {48'b0, $veda_rs1cap_length} :
+            $is_veda_cgetlen    ? {44'b0, $veda_rs1cap_length} :
             $is_veda_cgetperm   ? {48'b0, $veda_rs1cap_perms} :
             $is_veda_cgettag    ? {63'b0, $veda_rs1cap_tag} :
             $is_veda_cgettype   ? {48'b0, $veda_rs1cap_otype} :
-            $is_veda_cgetaddr   ? ({32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset}) :
-            $is_veda_cgetoffset ? {48'b0, $veda_rs1cap_offset} :
+            $is_veda_cgetaddr   ? ({32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset}) :
+            $is_veda_cgetoffset ? {44'b0, $veda_rs1cap_offset} :
                                   64'b0;
 
          // ─────────────────────────────────────────────────────────
@@ -1974,12 +2074,30 @@
          //  exceed cs1's own current window, the same "manipulate" family
          //  convention as OCA above.
          // ─────────────────────────────────────────────────────────
-         $veda_csetbounds_new_base[31:0]   = $veda_rs1cap_base + {16'b0, $veda_rs1cap_offset};
-         $veda_csetbounds_new_length[15:0] = $rs2_data[15:0];
+         // 2026-08-19 widening: cap.Offset/cap.Length are 20 bits now, so
+         // Base's own zero-extension of cap.Offset needs 12 zero bits
+         // (32-20), not 16, and the new-Length slice widens to
+         // rs2_data[19:0].
+         $veda_csetbounds_new_base[31:0]   = $veda_rs1cap_base + {12'b0, $veda_rs1cap_offset};
+         $veda_csetbounds_new_length[19:0] = $rs2_data[19:0];
          // Monotonic narrowing: the new window, starting at the current
          // position, must not extend past cs1's own remaining Length --
          // the same principle already applied for CSetBounds in Sail.
-         $veda_csetbounds_window_ok = (({48'b0, $veda_rs1cap_offset}) + {48'b0, $rs2_data[15:0]}) <= {48'b0, $veda_rs1cap_length};
+         // REAL PARITY FIX (found auditing this exact line for the
+         // 2026-08-19 widening, pre-existing since RTL Milestone 3, not
+         // introduced by this pass): Sail's own window_ok (veda_setbounds)
+         // compares cap.Offset against the FULL, untruncated new_length
+         // (X(rs2), xlenbits) -- only the later struct assignment slices
+         // new_length[19..0]. This check must therefore use the full
+         // 64-bit $rs2_data directly, NOT $veda_csetbounds_new_length
+         // above (already-sliced) -- doing otherwise let an rs2 whose
+         // full value was out-of-window but whose low bits happened to
+         // alias a small, in-window value wrongly succeed here where
+         // Sail soft-fails it. Compared at 65-bit width (not 64) so
+         // cap.Offset's own zero-extension can be added to the full
+         // 64-bit $rs2_data without truncating a legitimate sum that
+         // lands just past 2^64-1.
+         $veda_csetbounds_window_ok = ({45'b0, $veda_rs1cap_offset} + {1'b0, $rs2_data}) <= {45'b0, $veda_rs1cap_length};
          $veda_csetbounds_ok = $veda_rs1cap_tag && !$veda_sealed && $veda_csetbounds_window_ok;
 
          // ─────────────────────────────────────────────────────────
@@ -1996,8 +2114,8 @@
          //  from anything above.
          // ─────────────────────────────────────────────────────────
          $veda_cs2_tag          = /vreg[$veda_cseal_cunseal_rs2_cap]$tag;
-         $veda_cs2_length[15:0] = /vreg[$veda_cseal_cunseal_rs2_cap]$length;
-         $veda_cs2_offset[15:0] = /vreg[$veda_cseal_cunseal_rs2_cap]$offset;
+         $veda_cs2_length[19:0] = /vreg[$veda_cseal_cunseal_rs2_cap]$length;
+         $veda_cs2_offset[19:0] = /vreg[$veda_cseal_cunseal_rs2_cap]$offset;
          $veda_cs2_perms[15:0]  = /vreg[$veda_cseal_cunseal_rs2_cap]$perms;
          $veda_cs2_otype[15:0]  = /vreg[$veda_cseal_cunseal_rs2_cap]$otype;
          $veda_cs2_sealed       = ($veda_cs2_otype != 16'hFFFF);
@@ -2030,9 +2148,23 @@
          // otype. Without this line, a capability sealed here with
          // otype=0xFFFE would be indistinguishable from a genuine
          // VEDA_CSEALENTRY-minted sentry to VEDA_OCRETURN.
+         // WIDENING (2026-08-19): $veda_cs2_offset is now 20 bits; otype
+         // stays 16 bits (veda_types.sail). CSeal is the one real MINT
+         // site (otype := cs2.Offset[15:0], see the write-mux above) --
+         // mirrors veda_cap_insts.sail's own VEDA_CSEAL `authorized` fix:
+         // an explicit new precondition that the value about to become
+         // otype has no bits set outside otype's own 16-bit range,
+         // soft-failed (Tag cleared) via the existing $veda_cseal_ok path
+         // exactly like every other CSeal authorization failure -- not a
+         // new mechanism. Without this, e.g. cs2.Offset=20'h10005 would
+         // authorize a seal whose otype (0x0005) collides with an
+         // unrelated authority. The sentinel comparisons now compare the
+         // truncated [15:0] slice, safe only because the new conjunct
+         // already guarantees the upper 4 bits are zero.
          $veda_cseal_authorized = $veda_cs2_tag && !$veda_cs2_sealed && $veda_cs2_perms[8] &&
                                    ($veda_cs2_offset < $veda_cs2_length) &&
-                                   ($veda_cs2_offset != 16'hFFFF) && ($veda_cs2_offset != 16'hFFFE);
+                                   ($veda_cs2_offset[19:16] == 4'b0000) &&
+                                   ($veda_cs2_offset[15:0] != 16'hFFFF) && ($veda_cs2_offset[15:0] != 16'hFFFE);
          $veda_cseal_ok = $veda_cseal_authorized && $veda_rs1cap_tag && !$veda_sealed;
 
          // CUnseal: mirror of CSeal's authorization -- cs2 must be live,
@@ -2041,8 +2173,16 @@
          // type-authority proving it's allowed to unseal *this specific*
          // sealed type), within cs2's own bounds. cs1 must actually be
          // sealed and tagged.
+         // WIDENING (2026-08-19): CUnseal is a pure COMPARE site -- mirrors
+         // veda_cap_insts.sail's own VEDA_CUNSEAL fix: compare the full
+         // 20-bit $veda_cs2_offset against cs1's 16-bit otype explicitly
+         // zero-extended to 20 bits, rather than truncating
+         // $veda_cs2_offset. Mathematically equivalent to CSeal's own
+         // explicit gate above (equality can only hold if
+         // $veda_cs2_offset's upper 4 bits are already zero) and simpler
+         // at this read site.
          $veda_cunseal_authorized = $veda_cs2_tag && !$veda_cs2_sealed && $veda_cs2_perms[9] &&
-                                     $veda_sealed && ($veda_cs2_offset == $veda_rs1cap_otype) &&
+                                     $veda_sealed && ($veda_cs2_offset == {4'b0, $veda_rs1cap_otype}) &&
                                      ($veda_cs2_offset < $veda_cs2_length);
          $veda_cunseal_ok = $veda_cunseal_authorized && $veda_rs1cap_tag;
 
@@ -2131,7 +2271,7 @@
          // "clear bit 0 as for RISCV JALR" is a no-op here, since
          // Base/Offset are already byte-address-aligned integers with
          // no such low bit convention to clear.
-         $veda_ocinvoke_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+         $veda_ocinvoke_target[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
 
          // ─────────────────────────────────────────────────────────
          //  OCJALR (Milestone 17, veda-core/STACK_FRAME_CALL_RETURN_
@@ -2177,11 +2317,17 @@
          //  rather than inventing a second, parallel sealing mechanism.
          // ─────────────────────────────────────────────────────────
          $is_veda_ocjalr = $op_is_custom2 && ($funct3 == 3'b001) && ($funct7 == 7'b0010100);
+         // WIDENING (2026-08-19): OCJALR is a pure COMPARE site, same fix
+         // as CUnseal above and veda_cap_insts.sail's own VEDA_OCJALR:
+         // compare against zero_extend(cs1.otype) rather than truncating
+         // the now-20-bit $veda_cs2_offset. Applied identically to the
+         // violation gate, the cause mux, and the cap_idx mux below --
+         // check order unchanged.
          $veda_ocjalr_violation = $is_veda_ocjalr && (
             !$veda_rs1cap_tag || !$veda_cs2_tag ||
             !$veda_sealed || $veda_cs2_sealed ||
             !$veda_cs2_perms[9] ||
-            ($veda_cs2_offset != $veda_rs1cap_otype) ||
+            ($veda_cs2_offset != {4'b0, $veda_rs1cap_otype}) ||
             !$veda_rs1cap_perms[1]);
          $veda_ocjalr_cause[4:0] =
             !$veda_rs1cap_tag                       ? 5'h02 :
@@ -2189,7 +2335,7 @@
             !$veda_sealed                           ? 5'h03 :
             $veda_cs2_sealed                        ? 5'h03 :
             !$veda_cs2_perms[9]                     ? 5'h03 :
-            ($veda_cs2_offset != $veda_rs1cap_otype) ? 5'h04 :
+            ($veda_cs2_offset != {4'b0, $veda_rs1cap_otype}) ? 5'h04 :
                                                         5'h11; // remaining case: cs1 not executable
          $veda_ocjalr_cap_idx[3:0] =
             !$veda_rs1cap_tag                       ? $veda_ocl_ocs_rs1_cap :
@@ -2197,9 +2343,9 @@
             !$veda_sealed                           ? $veda_ocl_ocs_rs1_cap :
             $veda_cs2_sealed                        ? $veda_cseal_cunseal_rs2_cap :
             !$veda_cs2_perms[9]                     ? $veda_cseal_cunseal_rs2_cap :
-            ($veda_cs2_offset != $veda_rs1cap_otype) ? $veda_ocl_ocs_rs1_cap :
+            ($veda_cs2_offset != {4'b0, $veda_rs1cap_otype}) ? $veda_ocl_ocs_rs1_cap :
                                                         $veda_ocl_ocs_rs1_cap;
-         $veda_ocjalr_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+         $veda_ocjalr_target[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
 
          // ─────────────────────────────────────────────────────────
          //  Minimal OS kernel Milestone B (MILESTONE_B_RESULTS.md):
@@ -2264,7 +2410,7 @@
             !$veda_sealed                        ? 5'h03 :
             ($veda_rs1cap_otype != 16'hFFFE)     ? 5'h03 :
                                                     5'h11; // remaining case: cs1 not executable
-         $veda_ocreturn_target[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+         $veda_ocreturn_target[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 11: OSpecialRW + capability-authority-gated
@@ -2329,10 +2475,14 @@
          $veda_oda_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_base :
                                                                                                 >>1$veda_oda_base;
-         $veda_oda_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         // Length/Offset widened 16->20 bits, 2026-08-19 (mirrors
+         // veda_types.sail's capability.Length/.Offset -- ODA stores a
+         // full capability's own fields, so it needs the identical
+         // widening the main CRF's own $length/$offset already got).
+         $veda_oda_length[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_length :
                                                                                                   >>1$veda_oda_length;
-         $veda_oda_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         $veda_oda_offset[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && !>>1$veda_ospecialrw_scr_is_tsc && !>>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_offset :
                                                                                                   >>1$veda_oda_offset;
          $veda_oda_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
@@ -2370,10 +2520,14 @@
          $veda_tsc_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_base :
                                                                                                 >>1$veda_tsc_base;
-         $veda_tsc_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         // Length/Offset widened 16->20 bits, 2026-08-19 (mirrors
+         // veda_types.sail's capability.Length/.Offset -- TSC stores a
+         // full capability's own fields, so it needs the identical
+         // widening the main CRF's own $length/$offset already got).
+         $veda_tsc_length[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_length :
                                                                                                   >>1$veda_tsc_length;
-         $veda_tsc_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         $veda_tsc_offset[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_tsc) ? >>1$veda_rs1cap_offset :
                                                                                                   >>1$veda_tsc_offset;
          $veda_tsc_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
@@ -2414,10 +2568,14 @@
          $veda_ssc_base[31:0] = (|cpu$reset || |cpu>>1$reset) ? 32'b0 :
                                  (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_base :
                                                                                                 >>1$veda_ssc_base;
-         $veda_ssc_length[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         // Length/Offset widened 16->20 bits, 2026-08-19 (mirrors
+         // veda_types.sail's capability.Length/.Offset -- SSC stores a
+         // full capability's own fields, so it needs the identical
+         // widening the main CRF's own $length/$offset already got).
+         $veda_ssc_length[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_length :
                                                                                                   >>1$veda_ssc_length;
-         $veda_ssc_offset[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
+         $veda_ssc_offset[19:0] = (|cpu$reset || |cpu>>1$reset) ? 20'b0 :
                                    (>>1$is_veda_ospecialrw && !>>1$veda_ospecialrw_violation && >>1$veda_ospecialrw_scr_is_ssc) ? >>1$veda_rs1cap_offset :
                                                                                                   >>1$veda_ssc_offset;
          $veda_ssc_perms[15:0] = (|cpu$reset || |cpu>>1$reset) ? 16'b0 :
@@ -2442,7 +2600,7 @@
          //  memory dispatch NMC_ADD is) -- the identical permission split
          //  already reasoned through and built in Sail.
          // ─────────────────────────────────────────────────────────
-         $veda_cap_real_addr[63:0] = {32'b0, $veda_rs1cap_base} + {48'b0, $veda_rs1cap_offset};
+         $veda_cap_real_addr[63:0] = {32'b0, $veda_rs1cap_base} + {44'b0, $veda_rs1cap_offset};
          $veda_cap_old_d[63:0] =
             {elfmem[$veda_cap_real_addr[31:0]+7], elfmem[$veda_cap_real_addr[31:0]+6],
              elfmem[$veda_cap_real_addr[31:0]+5], elfmem[$veda_cap_real_addr[31:0]+4],
@@ -2453,8 +2611,8 @@
              elfmem[$veda_cap_real_addr[31:0]+1], elfmem[$veda_cap_real_addr[31:0]+0]};
 
          $veda_perm_nmc_ok = $veda_rs1cap_perms[12];
-         $veda_nmc_bounds_ok_d = (({48'b0, $veda_rs1cap_offset}) + 64'd8) <= {48'b0, $veda_rs1cap_length};
-         $veda_nmc_bounds_ok_w = (({48'b0, $veda_rs1cap_offset}) + 64'd4) <= {48'b0, $veda_rs1cap_length};
+         $veda_nmc_bounds_ok_d = (({44'b0, $veda_rs1cap_offset}) + 64'd8) <= {44'b0, $veda_rs1cap_length};
+         $veda_nmc_bounds_ok_w = (({44'b0, $veda_rs1cap_offset}) + 64'd4) <= {44'b0, $veda_rs1cap_length};
 
          // Only consumed by the trailing raw \SV always_ff block below
          // (invisible to SandPiper's own TLV-level dependency tracking,
@@ -2627,6 +2785,12 @@
          // needing an exact literal match.
          $veda_trap_taken = $veda_ocl_violation || $veda_ocs_violation ||
                              $veda_oclc_violation || $veda_ocsc_violation ||
+                             // NEW (2026-08-19 widening): the new 32-byte
+                             // alignment violation joins the same combined
+                             // trap-taken family -- without this, the check
+                             // computed above would be detected but never
+                             // acted on (no trap, no PC redirect).
+                             $veda_oclc_align_violation || $veda_ocsc_align_violation ||
                              $veda_nmc_add_w_violation || $veda_nmc_add_d_violation ||
                              $veda_atomic_violation || $veda_ocinvoke_violation ||
                              $veda_ocjalr_violation || $veda_ocreturn_violation ||
@@ -2638,6 +2802,15 @@
             $veda_ocs_violation       ? $veda_ocs_cause :
             $veda_oclc_violation      ? $veda_oclc_cause :
             $veda_ocsc_violation      ? $veda_ocsc_cause :
+            // NEW (2026-08-19 widening): VEDA_CAUSE_ALIGNMENT_VIOLATION =
+            // 5'h08 (5'b01000) -- a fixed literal, not a per-family
+            // *_cause signal, since there is only ever one possible cause
+            // value once either alignment signal fires (mirrors this same
+            // mux's own sibling $mtval construction below, which already
+            // inlines PCC/purecap's own fixed cap_idx/cause pairs directly
+            // rather than routing every fixed case through a named signal).
+            $veda_oclc_align_violation ? 5'h08 :
+            $veda_ocsc_align_violation ? 5'h08 :
             $veda_nmc_add_w_violation ? $veda_nmc_add_w_cause :
             $veda_nmc_add_d_violation ? $veda_nmc_add_d_cause :
             $veda_atomic_violation    ? $veda_atomic_cause :
@@ -2673,10 +2846,10 @@
                              $csr_is_mcause ? $mcause :
                              $csr_is_mtval  ? $mtval :
                              $csr_is_veda_pcc_base     ? {32'b0, $veda_pcc_base} :
-                             $csr_is_veda_pcc_length   ? {48'b0, $veda_pcc_length} :
+                             $csr_is_veda_pcc_length   ? {44'b0, $veda_pcc_length} :
                              $csr_is_veda_mepcc_base   ? {32'b0, $veda_mepcc_base} :
-                             $csr_is_veda_mepcc_length ? {48'b0, $veda_mepcc_length} :
-                             $csr_is_veda_attr         ? {32'b0, $veda_attr} :
+                             $csr_is_veda_mepcc_length ? {44'b0, $veda_mepcc_length} :
+                             $csr_is_veda_attr         ? {28'b0, $veda_attr} :
                              $csr_is_veda_mode         ? {32'b0, $veda_mode} :
                                               64'b0;
          // CSRRS with rs1=x0 must not write the CSR at all (real
@@ -2711,7 +2884,7 @@
             ($csr_is_veda_pcc_base || $csr_is_veda_pcc_length ||
              $csr_is_veda_mepcc_base || $csr_is_veda_mepcc_length ||
              $csr_is_veda_mode || $csr_is_mtvec) &&
-            ($veda_pcc_length != 16'hFFFF);
+            ($veda_pcc_length != 20'hFFFFF);
          `BOGUS_USE($csr_rdata)
          `BOGUS_USE($csr_wdata)
 
@@ -2823,13 +2996,15 @@
 
          // ─────────────────────────────────────────────────────────
          //  RTL MILESTONE 14: veda_pcc_base/veda_pcc_length (the live
-         //  compartment) and veda_mepcc_base/veda_pcc_length (the saved
+         //  compartment) and veda_mepcc_base/veda_mepcc_length (the saved
          //  copy across a trap) -- the same real persistent-signal idiom
          //  $mtvec/$mepc already established (Milestone 9), applied to a
          //  new, genuinely different kind of state (a fetch-time bound,
          //  not an ordinary CSR value alone). Reset to
-         //  VEDA_PCC_UNBOUNDED (16'hFFFF) -- a real correctness
-         //  requirement, not styling: left at 0 by default, every fetch
+         //  VEDA_PCC_UNBOUNDED (20'hFFFFF, widened from 16'hFFFF
+         //  alongside capability Length/Offset, 2026-08-19) -- a real
+         //  correctness requirement, not styling: left at 0 by default,
+         //  every fetch
          //  would bounds-check against an empty window at address 0 and
          //  hard-trap on the very first cycle (the identical real reason
          //  already named on the Sail side, postlude/step_ext.sail).
@@ -2868,17 +3043,17 @@
          // test property); (5) retain.
          $veda_pcc_base[31:0] = $reset ? 32'b0 :
                                  (>>1$veda_trap_taken) ? 32'b0 :
-                                 (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? >>1$veda_mepcc_base :
+                                 (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? >>1$veda_mepcc_base :
                                  (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_base :
                                  (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_base :
                                  (>>1$csr_write_en && >>1$csr_is_veda_pcc_base) ? >>1$csr_wdata[31:0] :
                                                                                    >>1$veda_pcc_base;
-         $veda_pcc_length[15:0] = $reset ? 16'hFFFF :
-                                   (>>1$veda_trap_taken) ? 16'hFFFF :
-                                   (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? >>1$veda_mepcc_length :
+         $veda_pcc_length[19:0] = $reset ? 20'hFFFFF :
+                                   (>>1$veda_trap_taken) ? 20'hFFFFF :
+                                   (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? >>1$veda_mepcc_length :
                                    (>>1$is_veda_ocinvoke && !(>>1$veda_ocinvoke_violation)) ? >>1$veda_rs1cap_length :
                                    (>>1$is_veda_ocreturn && !(>>1$veda_ocreturn_violation)) ? >>1$veda_rs1cap_length :
-                                   (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[15:0] :
+                                   (>>1$csr_write_en && >>1$csr_is_veda_pcc_length) ? >>1$csr_wdata[19:0] :
                                                                                        >>1$veda_pcc_length;
          // Real bug found (not copied blindly from Sail) while designing
          // this mirror: the pre-existing trap-time capture below was
@@ -2888,7 +3063,7 @@
          // a second, nested trap between a first trap's save and its own
          // later mret would silently overwrite the first trap's real saved
          // bounds with {don't-care, UNBOUNDED}. Fixed by gating the capture
-         // itself on `>>1$veda_pcc_length != 16'hFFFF` (a compartment was
+         // itself on `>>1$veda_pcc_length != 20'hFFFFF` (a compartment was
          // genuinely live at the moment of the trap) -- exactly the Sail
          // side's own already-adversarially-reviewed conditional-capture
          // design (veda_pcc_save_and_reset()'s own guard). Self-consuming:
@@ -2897,14 +3072,14 @@
          // the identical self-consuming property the Sail side's own design
          // already proved necessary for the same nested-trap hazard class.
          $veda_mepcc_base[31:0] = $reset ? 32'b0 :
-                                   (>>1$veda_trap_taken && (>>1$veda_pcc_length != 16'hFFFF)) ? >>1$veda_pcc_base :
-                                   (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? 32'b0 :
+                                   (>>1$veda_trap_taken && (>>1$veda_pcc_length != 20'hFFFFF)) ? >>1$veda_pcc_base :
+                                   (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? 32'b0 :
                                    (>>1$csr_write_en && >>1$csr_is_veda_mepcc_base) ? >>1$csr_wdata[31:0] :
                                                                                        >>1$veda_mepcc_base;
-         $veda_mepcc_length[15:0] = $reset ? 16'hFFFF :
-                                     (>>1$veda_trap_taken && (>>1$veda_pcc_length != 16'hFFFF)) ? >>1$veda_pcc_length :
-                                     (>>1$is_mret && (>>1$veda_mepcc_length != 16'hFFFF)) ? 16'hFFFF :
-                                     (>>1$csr_write_en && >>1$csr_is_veda_mepcc_length) ? >>1$csr_wdata[15:0] :
+         $veda_mepcc_length[19:0] = $reset ? 20'hFFFFF :
+                                     (>>1$veda_trap_taken && (>>1$veda_pcc_length != 20'hFFFFF)) ? >>1$veda_pcc_length :
+                                     (>>1$is_mret && (>>1$veda_mepcc_length != 20'hFFFFF)) ? 20'hFFFFF :
+                                     (>>1$csr_write_en && >>1$csr_is_veda_mepcc_length) ? >>1$csr_wdata[19:0] :
                                                                                            >>1$veda_mepcc_length;
          // RTL Milestone 18: plain read/write CSR, no other write source
          // (unlike veda_pcc_base/length, which also get written by a
@@ -2913,8 +3088,12 @@
          // all-zero Length/Perms just makes the first Populate-Fast
          // object real but permission-less until software actually sets
          // this CSR, matching the Sail side's own identical reasoning.
-         $veda_attr[31:0] = $reset ? 32'b0 :
-                              (>>1$csr_write_en && >>1$csr_is_veda_attr) ? >>1$csr_wdata[31:0] :
+         // 2026-08-19 widening: bits(32)->bits(36) alongside the capability
+         // struct's own Length widening (veda_regs.sail:234-239) -- Perms
+         // keeps its original position [15:0]; only Length's own span
+         // grows, from [31:16] to [35:16].
+         $veda_attr[35:0] = $reset ? 36'b0 :
+                              (>>1$csr_write_en && >>1$csr_is_veda_attr) ? >>1$csr_wdata[35:0] :
                                                                             >>1$veda_attr;
          // RTL Milestone 19: veda_mode, bit 0 = veda_purecap. Identical
          // simple reset/CSRRW-only pattern as veda_attr directly above --
@@ -3137,7 +3316,7 @@
          // shared code path by construction, matching the Sail side's own
          // "never interferes with a legitimate Veda access" guarantee.
          $veda_purecap_violation = ($is_load || $is_store) &&
-                                    ($veda_mode[0] || ($veda_pcc_length != 16'hFFFF));
+                                    ($veda_mode[0] || ($veda_pcc_length != 20'hFFFFF));
          // VEDA-CORE RTL MILESTONE 7: base ISA stores can land inside the
          // same real elfmem[] region Veda-Core objects live in (in
          // act4_mode) -- must clear that granule's tag too (see the byte-
@@ -3176,9 +3355,9 @@
              elfmem[$veda_real_addr[31:0]+3], elfmem[$veda_real_addr[31:0]+2],
              elfmem[$veda_real_addr[31:0]+1], elfmem[$veda_real_addr[31:0]+0]};
 
-         // OCL.C's own 16-byte little-endian read (Milestone 7) -- same
-         // real shape as OCL.D's 8-byte read directly above, doubled in
-         // width, at the identical $veda_real_addr. Feeds /vreg's own new
+         // OCL.C's own 17-byte little-endian read (Milestone 7, widened
+         // 2026-08-19) -- same real shape as OCL.D's 8-byte read directly
+         // above, at the identical $veda_real_addr. Feeds /vreg's own new
          // OCL.C write source below, not $load_data/$wr_data (this
          // instruction's destination is a Capability Register, not a
          // GPR -- same reason OCA/CSetBounds/CSeal/CUnseal are absent
@@ -3188,9 +3367,10 @@
          // elfmem[] itself, matching the design's own genuinely-separate
          // -array precedent), a DRAM-tier one reads from elfmem[]
          // exactly as every prior milestone already did.
-         $veda_oclc_load_data[127:0] =
+         $veda_oclc_load_data[135:0] =
             $veda_capmem_tcm_hit ?
-            {tcm_scratch[$veda_real_addr[31:0]+15], tcm_scratch[$veda_real_addr[31:0]+14],
+            {tcm_scratch[$veda_real_addr[31:0]+16],
+             tcm_scratch[$veda_real_addr[31:0]+15], tcm_scratch[$veda_real_addr[31:0]+14],
              tcm_scratch[$veda_real_addr[31:0]+13], tcm_scratch[$veda_real_addr[31:0]+12],
              tcm_scratch[$veda_real_addr[31:0]+11], tcm_scratch[$veda_real_addr[31:0]+10],
              tcm_scratch[$veda_real_addr[31:0]+9],  tcm_scratch[$veda_real_addr[31:0]+8],
@@ -3198,7 +3378,8 @@
              tcm_scratch[$veda_real_addr[31:0]+5],  tcm_scratch[$veda_real_addr[31:0]+4],
              tcm_scratch[$veda_real_addr[31:0]+3],  tcm_scratch[$veda_real_addr[31:0]+2],
              tcm_scratch[$veda_real_addr[31:0]+1],  tcm_scratch[$veda_real_addr[31:0]+0]} :
-            {elfmem[$veda_real_addr[31:0]+15], elfmem[$veda_real_addr[31:0]+14],
+            {elfmem[$veda_real_addr[31:0]+16],
+             elfmem[$veda_real_addr[31:0]+15], elfmem[$veda_real_addr[31:0]+14],
              elfmem[$veda_real_addr[31:0]+13], elfmem[$veda_real_addr[31:0]+12],
              elfmem[$veda_real_addr[31:0]+11], elfmem[$veda_real_addr[31:0]+10],
              elfmem[$veda_real_addr[31:0]+9],  elfmem[$veda_real_addr[31:0]+8],
@@ -3209,11 +3390,13 @@
          // Field-for-field the inverse of $veda_ocsc_packed's own pack
          // order above (Object_ID @ Base @ Length @ Offset @ Perms @
          // otype @ Reserved @ 1'b0 padding) -- matching the Sail model's
-         // veda_cap_unpack exactly.
-         $veda_oclc_unpacked_object_id[22:0] = $veda_oclc_load_data[127:105];
-         $veda_oclc_unpacked_base[31:0]      = $veda_oclc_load_data[104:73];
-         $veda_oclc_unpacked_length[15:0]    = $veda_oclc_load_data[72:57];
-         $veda_oclc_unpacked_offset[15:0]    = $veda_oclc_load_data[56:41];
+         // veda_cap_unpack exactly. Slice widths/positions are the RTL
+         // mirror of veda_types.sail's own 136-bit veda_cap_unpack,
+         // widened 2026-08-19.
+         $veda_oclc_unpacked_object_id[22:0] = $veda_oclc_load_data[135:113];
+         $veda_oclc_unpacked_base[31:0]      = $veda_oclc_load_data[112:81];
+         $veda_oclc_unpacked_length[19:0]    = $veda_oclc_load_data[80:61];
+         $veda_oclc_unpacked_offset[19:0]    = $veda_oclc_load_data[60:41];
          $veda_oclc_unpacked_perms[15:0]     = $veda_oclc_load_data[40:25];
          $veda_oclc_unpacked_otype[15:0]     = $veda_oclc_load_data[24:9];
          $veda_oclc_unpacked_reserved[7:0]   = $veda_oclc_load_data[8:1];
@@ -3228,8 +3411,14 @@
          // tag_mem[] with a tcm_scratch-relative granule (or vice versa)
          // is exactly the aliasing/overflow risk flagged before writing
          // this; both index AND array must switch together.
+         // NEW (2026-08-19 widening): AND of BOTH granules a 17-byte
+         // capability's own real footprint spans (idx and idx+1) --
+         // mirrors mem_metadata.sail's own __ReadRAM_Meta fix (t0 & t1):
+         // a capability is only genuinely valid if EVERY granule it spans
+         // still reads back tagged.
          $veda_oclc_loaded_tag = $veda_capmem_tcm_hit ?
-            tcm_scratch_tag[$veda_capmem_tcm_granule] : tag_mem[$veda_capmem_granule];
+            (tcm_scratch_tag[$veda_capmem_tcm_granule] & tcm_scratch_tag[$veda_capmem_tcm_granule2]) :
+            (tag_mem[$veda_capmem_granule] & tag_mem[$veda_capmem_granule2]);
 
          $load_data[63:0] =
             $is_lb  ? {{56{$mem_shifted[7]}},  $mem_shifted[7:0]}  :
@@ -3650,6 +3839,12 @@
          odt_mem[CPU_veda_odt_addr_a0+3] <= CPU_veda_odtpd_new_base_a0[31:24];
          odt_mem[CPU_veda_odt_addr_a0+4] <= CPU_veda_odtpd_new_length_a0[7:0];
          odt_mem[CPU_veda_odt_addr_a0+5] <= CPU_veda_odtpd_new_length_a0[15:8];
+         // Length widened 16->20 bits, 2026-08-19: the new upper nibble
+         // lands in byte +14 (previously fully spare), mirroring the read
+         // side above -- zero-padded in the top 4 bits of the byte, the
+         // same partially-used-byte convention already used for +9's
+         // valid bit and +13's retired bit.
+         odt_mem[CPU_veda_odt_addr_a0+14] <= {4'b0, CPU_veda_odtpd_new_length_a0[19:16]};
          odt_mem[CPU_veda_odt_addr_a0+6] <= CPU_veda_odtpd_new_perms_a0[7:0];
          odt_mem[CPU_veda_odt_addr_a0+7] <= CPU_veda_odtpd_new_perms_a0[15:8];
          odt_mem[CPU_veda_odt_addr_a0+8] <= CPU_veda_odtpd_new_gen_a0;
@@ -3708,7 +3903,13 @@
    // side above already applies, closing the same aliasing/overflow risk
    // on the write side too.
    always_ff @(posedge clk) begin
-      if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0 && CPU_veda_capmem_tcm_hit_a0) begin
+      // NEW (2026-08-19 widening): !CPU_veda_ocsc_align_violation_a0 added
+      // to both branch gates below -- the identical violation-suppresses
+      // -write convention already applied to !CPU_veda_ocsc_violation_a0,
+      // now extended to the new 32-byte-alignment violation, so a
+      // misaligned-but-otherwise-legal OCS.C cannot commit its bytes/tag
+      // to memory before the trap takes effect.
+      if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0 && !CPU_veda_ocsc_align_violation_a0 && CPU_veda_capmem_tcm_hit_a0) begin
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+0]  <= CPU_veda_ocsc_packed_a0[7:0];
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+1]  <= CPU_veda_ocsc_packed_a0[15:8];
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+2]  <= CPU_veda_ocsc_packed_a0[23:16];
@@ -3725,8 +3926,17 @@
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+13] <= CPU_veda_ocsc_packed_a0[111:104];
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+14] <= CPU_veda_ocsc_packed_a0[119:112];
          tcm_scratch[CPU_veda_real_addr_a0[31:0]+15] <= CPU_veda_ocsc_packed_a0[127:120];
-         tcm_scratch_tag[CPU_veda_capmem_tcm_granule_a0] <= CPU_veda_ocsc_store_tag_a0;
-      end else if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0) begin
+         // NEW (2026-08-19 widening): 17th byte-lane, the new top byte of
+         // the widened 136-bit pack.
+         tcm_scratch[CPU_veda_real_addr_a0[31:0]+16] <= CPU_veda_ocsc_packed_a0[135:128];
+         // NEW (2026-08-19 widening): 2 adjacent, contiguous granule
+         // writes (never a runtime-variable span) -- per the decided
+         // design, the tag granule STAYS 16 bytes unchanged, so a 17-byte,
+         // 32-byte-aligned capability-store always spans exactly its own
+         // start granule and the very next one.
+         tcm_scratch_tag[CPU_veda_capmem_tcm_granule_a0]  <= CPU_veda_ocsc_store_tag_a0;
+         tcm_scratch_tag[CPU_veda_capmem_tcm_granule2_a0] <= CPU_veda_ocsc_store_tag_a0;
+      end else if (act4_mode && CPU_is_veda_ocs_c_a0 && !CPU_veda_ocsc_violation_a0 && !CPU_veda_ocsc_align_violation_a0) begin
          elfmem[CPU_veda_real_addr_a0[31:0]+0]  <= CPU_veda_ocsc_packed_a0[7:0];
          elfmem[CPU_veda_real_addr_a0[31:0]+1]  <= CPU_veda_ocsc_packed_a0[15:8];
          elfmem[CPU_veda_real_addr_a0[31:0]+2]  <= CPU_veda_ocsc_packed_a0[23:16];
@@ -3743,7 +3953,16 @@
          elfmem[CPU_veda_real_addr_a0[31:0]+13] <= CPU_veda_ocsc_packed_a0[111:104];
          elfmem[CPU_veda_real_addr_a0[31:0]+14] <= CPU_veda_ocsc_packed_a0[119:112];
          elfmem[CPU_veda_real_addr_a0[31:0]+15] <= CPU_veda_ocsc_packed_a0[127:120];
-         tag_mem[CPU_veda_capmem_granule_a0] <= CPU_veda_ocsc_store_tag_a0;
+         // NEW (2026-08-19 widening): 17th byte-lane, the new top byte of
+         // the widened 136-bit pack.
+         elfmem[CPU_veda_real_addr_a0[31:0]+16] <= CPU_veda_ocsc_packed_a0[135:128];
+         // NEW (2026-08-19 widening): 2 adjacent, contiguous granule
+         // writes -- the elfmem-tier's own mirror of the TCM-tier fix
+         // above; same real reason (tag granule stays 16 bytes, capability
+         // is now 17 bytes, 32-byte alignment guarantees exactly 2
+         // adjacent granules).
+         tag_mem[CPU_veda_capmem_granule_a0]  <= CPU_veda_ocsc_store_tag_a0;
+         tag_mem[CPU_veda_capmem_granule2_a0] <= CPU_veda_ocsc_store_tag_a0;
       end
    end
    endmodule

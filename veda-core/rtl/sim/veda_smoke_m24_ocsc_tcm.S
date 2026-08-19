@@ -61,13 +61,19 @@ _start:
     .insn r 0x5b, 0x0, 0x00, x13, x2, x0 # cgetbase x13, c2  -- expect 0x80010000
 
     # ---- negative: TCM offset never written -- must read back untagged ----
-    li   x3, 0x10
-    .insn r 0x0b, 0x4, 0x00, x3, x8, x3  # ocl.c c8, x3(=0x10), c3
+    # 2026-08-19 widening: OCL.C/OCS.C now require 32-byte alignment
+    # (VEDA_CAUSE_ALIGNMENT_VIOLATION) -- 0x10 is no longer a legal OCL.C
+    # offset (it would hard-trap instead of reading back untagged), so
+    # this negative check moves to the next 32-byte-aligned offset that
+    # is still never written by the positive store above (which only
+    # touches bytes 0-16, granules 0-1): 0x20 (granules 2-3).
+    li   x3, 0x20
+    .insn r 0x0b, 0x4, 0x00, x3, x8, x3  # ocl.c c8, x3(=0x20), c3
     .insn r 0x5b, 0x0, 0x03, x14, x3, x0 # cgettag x14, c3  -- expect 0
 
     # ---- negative: DRAM offset never written -- must read back untagged ----
-    li   x4, 0x10
-    .insn r 0x0b, 0x4, 0x00, x4, x9, x4  # ocl.c c9, x4(=0x10), c4
+    li   x4, 0x20
+    .insn r 0x0b, 0x4, 0x00, x4, x9, x4  # ocl.c c9, x4(=0x20), c4
     .insn r 0x5b, 0x0, 0x03, x15, x4, x0 # cgettag x15, c4  -- expect 0
 1:
     j 1b

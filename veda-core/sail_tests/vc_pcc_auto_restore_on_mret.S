@@ -75,7 +75,7 @@ phase1_resume:
     la   t4, compartment_a
     bne  t3, t4, fail
     csrr t3, 0x7c3                 # veda_mepcc_length -- self-consuming: must already read back UNBOUNDED
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
     li   x24, 0x600D               # phase 1 restore + self-consume: correct
 
@@ -135,7 +135,7 @@ compartment_b:
     ecall                          # phase 2's own trap -- handler EXPLICITLY overrides
 phase2_resume:
     csrr t3, 0x7c1                 # expect still UNBOUNDED -- override honored, not restored
-    li   t4, 0xFFFF
+    li   t4, 0xFFFFF
     bne  t3, t4, fail
     li   x27, 0x600D               # phase 2 override: correct
     j    phase3_start
@@ -261,7 +261,7 @@ h_phase1_escape:
     #    veda_pcc_save_and_reset() (live is unbounded again), but also
     #    clear the shadow so this phase's own now-abandoned compartment
     #    can never be auto-restored later. --
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3
     # -- resume at phase2_start directly, NOT mepc+4: +4 would only skip
     #    past the trapping `csrw 0x7c1` itself, landing on the very next
@@ -276,7 +276,7 @@ h_phase2_ecall:
     bne  t3, t4, fail
     li   x27, 0x600D
     # -- explicit override: this is phase 2's whole point --
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3                 # veda_mepcc_length := VEDA_PCC_UNBOUNDED
     csrr t3, mepc
     addi t3, t3, 4
@@ -300,7 +300,7 @@ h_phase3_escape:
     csrr t3, mtval
     li   t4, 0x201
     bne  t3, t4, fail
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF
     csrw 0x7c3, t3
     li   x22, 0x900D               # final sentinel -- all three phases completed in order
     # -- resume at done directly, NOT mepc+4, same reasoning as

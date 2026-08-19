@@ -37,10 +37,15 @@ _start:
     li   a0, 1
     .insn i 0x0b, 0x5, x0, a0, 0          # veda.bind c0, a0
 
-    # Object 2: SPILL region (Load|Store) -- ordinary .data.
+    # Object 2: SPILL region (Load|Store) -- ordinary .data. Length=0x0011
+    # (17 bytes, was 0x0010/16 pre-widening) -- OCL.C/OCS.C now move a
+    # 17-byte capability (136 bits, 2026-08-19 Length/Offset widening),
+    # so a 16-byte-bounded spill slot is exactly 1 byte too small and
+    # correctly BOUNDS_VIOLATION-traps; this is real, intended behavior,
+    # not a bug worked around.
     la   t0, g_spill
     slli t0, t0, 32
-    li   t1, 0x0010000C
+    li   t1, 0x0011000C
     or   t0, t0, t1
     li   a0, 2
     .insn r 0x0b, 0x0, 0x03, x5, a0, t0   # veda.odt.populate x5, a0, t0
@@ -78,5 +83,6 @@ g_data:
     .dword 0
 .align 4
 g_spill:
+    .dword 0
     .dword 0
     .dword 0

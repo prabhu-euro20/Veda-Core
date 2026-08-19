@@ -144,7 +144,7 @@ h_escape:
     # -- the fetch past compartment_u's real 0x40-byte boundary trapped
     #    here, confirming the restored bounds were genuinely enforced,
     #    not merely CSR-readable. --
-    li   t3, 0xFFFF
+    li   t3, 0xFFFFF                # 20-bit sentinel since the 2026-08-19 widening (was 0xFFFF/16-bit)
     csrw 0x7c3, t3                  # explicit full unbind of the now-abandoned compartment's shadow
     li   x22, 0x900D                # final sentinel
     la   t3, done

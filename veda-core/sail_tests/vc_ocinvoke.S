@@ -105,15 +105,18 @@ landing_pad:
     # architecturally correct way, mirroring vc_pcc_bounds.S's own
     # already-established "return OCInvoke into an unbounded capability"
     # pattern -- not by weakening the enforcement.
-    # -- Object_ID=33 (return CODE): Base=return_pad, Length=0xFFFF
-    #    (VEDA_PCC_UNBOUNDED), Perms=Permit_Execute|Permit_Invoke=0x0402. --
+    # -- Object_ID=33 (return CODE): Base=return_pad, Length=0xFFFFF
+    #    (VEDA_PCC_UNBOUNDED, 20-bit sentinel since the 2026-08-19
+    #    widening), Perms=Permit_Execute|Permit_Invoke=0x0402. Plain
+    #    VEDA_ODT_POPULATE's own 16-bit-capped Length field can never
+    #    represent this value (NEXT_STEPS_ROADMAP.md "Break 3"), so
+    #    VEDA_ODT_POPULATE_FAST + veda_attr is required here. --
+    li   t1, 0xFFFFF0402           # veda_attr: Length=0xFFFFF, Perms=0x0402
+    csrw 0x7c4, t1
     la   t0, return_pad
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402
-    or   t0, t0, t1
     li   x1, 33
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2
 
     # -- Object_ID=34 (return DATA): Permit_Invoke only = 0x0400. --
     li   x1, 34

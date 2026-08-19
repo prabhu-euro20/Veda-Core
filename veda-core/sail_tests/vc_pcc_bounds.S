@@ -12,7 +12,7 @@ _start:
     # the bookkeeping itself is correct, field-for-field, via the new
     # veda_pcc_base/veda_pcc_length CSRs (0x7c0/0x7c1).
 
-    csrr x9, 0x7c1                # pcc_length BEFORE any OCInvoke -- expect 0xFFFF (VEDA_PCC_UNBOUNDED, the real reset value)
+    csrr x9, 0x7c1                # pcc_length BEFORE any OCInvoke -- expect 0xFFFFF (VEDA_PCC_UNBOUNDED, the real reset value; 20-bit sentinel since the 2026-08-19 widening, was 0xFFFF/16-bit)
 
     # -- Object_ID=50 (CODE): Permit_Execute|Permit_Invoke = 0x0402,
     #    Base = landing_pad's own runtime address, Length=0x0100 (256
@@ -53,16 +53,20 @@ landing_pad:
     csrr x10, 0x7c0                # pcc_base AFTER OCInvoke -- expect landing_pad's own runtime address
     csrr x11, 0x7c1                # pcc_length AFTER OCInvoke -- expect 0x0100
 
-    # -- Object_ID=53 (return CODE): Base=return_pad, Length=0xFFFF
+    # -- Object_ID=53 (return CODE): Base=return_pad, Length=0xFFFFF
     #    (VEDA_PCC_UNBOUNDED -- a real, deliberate "return to the
-    #    unconstrained caller context" capability, Perms=0x0402). --
+    #    unconstrained caller context" capability, Perms=0x0402). Plain
+    #    VEDA_ODT_POPULATE's own 16-bit-capped Length field (deliberately
+    #    UNCHANGED by the 2026-08-19 widening, NEXT_STEPS_ROADMAP.md
+    #    "Break 3") can never represent the new 20-bit sentinel, so
+    #    VEDA_ODT_POPULATE_FAST + veda_attr (which carries the real 20-bit
+    #    Length) is required for this specific object. --
+    li   t1, 0xFFFFF0402           # veda_attr: Length=0xFFFFF, Perms=0x0402
+    csrw 0x7c4, t1
     la   t0, return_pad
-    slli t0, t0, 32
-    li   t1, 0xFFFF0402
-    or   t0, t0, t1
     li   x1, 53
     mv   x2, t0
-    .insn r 0x0b, 0x0, 0x03, x5, x1, x2  # veda.odt.populate x5, x1, x2
+    .insn r 0x0b, 0x0, 0x04, x5, x1, x2  # veda.odt.populate.fast x5, x1, x2
 
     # -- Object_ID=54 (return DATA): Permit_Invoke only = 0x0400. --
     li   x1, 54
@@ -80,15 +84,15 @@ landing_pad:
     .insn r 0x5b, 0x1, 0x12, x0, x7, x8  # ocinvoke c7, c8   -- widens PCC back to unbounded
 
 return_pad:
-    csrr x12, 0x7c1                # pcc_length AFTER the return OCInvoke -- expect 0xFFFF again
+    csrr x12, 0x7c1                # pcc_length AFTER the return OCInvoke -- expect 0xFFFFF again
 
-    li   t2, 0xFFFF
+    li   t2, 0xFFFFF
     bne  x9, t2, fail
     la   t2, landing_pad
     bne  x10, t2, fail
     li   t2, 0x0100
     bne  x11, t2, fail
-    li   t2, 0xFFFF
+    li   t2, 0xFFFFF
     bne  x12, t2, fail
 
     RVMODEL_HALT_PASS

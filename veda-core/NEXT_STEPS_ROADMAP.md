@@ -975,6 +975,266 @@ implementation -- both remain real, separately-scoped implementation work with t
 negative tests, mutation tests, and full regression, following this project's own standing
 discipline, not silently folded into this design pass.**
 
+## DECIDED, 2026-08-19: the widening's real blast radius, and three architectural breaks the
+## "mechanical" framing above did not anticipate
+
+Before touching Sail or RTL, every real touch point for the 16->24-bit `Length`/`Offset` widening
+was mapped directly against the current source (not assumed): the full capability pack/unpack path
+in both `veda_types.sail` and `veda_core.tlv`, every zero-extension/sentinel site, the ODT's own
+Length storage, both ODT-Populate encodings, the capability tag-store's granule arithmetic, and the
+C-emulator GDB-stub support that also serializes the 16-byte capability format. The 2026-08-16
+decision above correctly settled the encoding *kind* and *widths*; this pass settles the
+*implementation-level* consequences, three of which are real architectural breaks, not bit-slice
+edits, and were not visible until the full source was actually read end to end.
+
+**Correction to the 2026-08-16 entry's own arithmetic, found in the process:** that entry's Part-1
+description of the *current* register ("128 bits plus out-of-band Tag") is stale -- the real
+field sum is `23+32+16+16+16+16+8 = 127` bits (`veda_types.sail:59-67`, `veda_core.tlv`'s own `/vreg`
+declarations agree), not 128; the widening math the same entry does later (line ~929) already and
+silently uses the correct 127. New total, unchanged from that entry: `127 + 8 + 8 = 143`, `+1` pad
+bit = **144 bits (18 bytes)**.
+
+**Break 1 -- the tag-store's granule arithmetic assumes a power-of-two capability width, and 18
+bytes is not one.** `tag_mem`/`tcm_scratch_tag` are sized `ELFMEM_SIZE/16`/`TCM_SCRATCH_SIZE/16` and
+indexed by `addr >> 4` (`veda_core.tlv:516,548,1871,1887,1904,3152` and the Sail-side tag-store,
+`model/core/mem_metadata.sail:34,40-76`, built the same way) -- a right-shift, which is only correct
+because 16 is a power of two and evenly divides the current 16-byte capability. 18 does not have that
+property (`18 = 2 x 3^2`; its only power-of-two factor is 2). Three options were weighed, not
+guessed between:
+- Real division by 18 for the granule index -- rejected: this is exactly the "new, complex
+  arithmetic" the 2026-08-16 decision's own Reason 5 named as the thing widening was chosen *to
+  avoid* (constant-divisor division still synthesizes to a real multiply/shift network, not a bare
+  shift); adopting it here would undercut that decision's own stated reasoning.
+- Pad the capability to the next power of two (32 bytes / 256 bits) so the granule trick needs no
+  change -- rejected: doubles the register's real, moved-on-every-`OCL.C`/`OCS.C`/SSC-spill width
+  for 14 bytes of pure padding, a much larger, more pervasive cost than the 2026-08-16 decision's own
+  accepted 18-byte trade, and inconsistent with `Object_ID`/`Base`/`Perms`/`otype` all staying exactly
+  as they are today.
+- **Shrink the tag-store's own granule to the largest power of two that evenly divides 18 bytes,
+  which is 2 bytes.** `18 / 2 = 9` exactly, so an aligned capability-store never partially overlaps a
+  granule shared with unrelated adjacent data (the real security property the granule trick exists to
+  protect -- a partial/shared final granule would let unrelated bytes silently inherit a valid tag from
+  a neighboring real capability, or vice versa). This keeps the indexing a bare shift (`>>4` -> `>>1`),
+  keeps the capability's own serialized width at exactly 144 bits with no padding, and costs a real but
+  bounded 8x growth in tag-array *entry count* (each entry is 1 bit) -- for `ELFMEM_SIZE=524288`:
+  32,768 tag bits (4 KiB) today -> 262,144 tag bits (32 KiB) widened; `TCM_SCRATCH_SIZE=4096`: 256
+  bits (32 B) -> 2,048 bits (256 B). Both are simulation-scale behavioral arrays in this project's
+  current no-PDK stage, not real tag-SRAM, so this is judged the right trade: smallest real hardware
+  cost that still satisfies both the "no real division" and "no shared/partial granule" requirements
+  simultaneously, and the *only* one of the three options that does both without also either adding new
+  complex arithmetic or padding the register itself.
+
+  **Decided: tag-store granule = 2 bytes.** Every `>>4` in the tag-granule path becomes `>>1`;
+  `ELFMEM_SIZE/16`/`TCM_SCRATCH_SIZE/16` become `/2`; a capability-store's tag-set/-clear logic moves
+  from writing 1 granule bit to writing a fixed, compile-time-known 9 granule bits per store (18 bytes
+  / 2-byte granule, exact, no remainder, fully unrollable -- still mechanical, not a loop over a
+  runtime-variable count).
+
+**Break 2 -- `VEDA_ODT_POPULATE_FAST`'s `veda_attr` CSR overflows.** `veda_attr` packs
+`Length[31:16](16) @ Perms[15:0](16)` into exactly 32 bits (`veda_core.tlv:2916`,
+`veda_regs.sail:227-235,317`); at 24-bit `Length` that pair needs 40 bits, which does not fit.
+**Decided: widen `veda_attr`'s own declared width from 32 to 40 bits** (`Length[39:16] @
+Perms[15:0]`) -- both the Sail scan and direct reading of the CSR-read path confirm `veda_attr` is
+already `zero_extend`-read into a 64-bit CSR value on every read, so this needs no change to the CSR
+mechanism itself, only the register's own declared width and the two pack/unpack slice expressions.
+No instruction-encoding change follows from this -- `.fast` itself never packed `Length` into a GPR
+operand, only into this CSR, so the fix is fully contained to the CSR's own declaration.
+
+**Break 3 -- plain `VEDA_ODT_POPULATE`'s single-GPR descriptor overflows, and cannot be widened at
+all.** `veda.odt.populate` (not `.fast`) packs `Base[63:32](32) @ Length[31:16](16) @
+Perms[15:0](16)` into one 64-bit `rs2` GPR, exactly filling it today (`veda_core.tlv:1441-1454`,
+mirrored in `veda_cap_insts.sail`). At 24-bit `Length` the needed total is `32+24+16 = 72` bits --
+this is not a slice that can widen, because a RISC-V GPR is fixed at 64 bits by the base ISA itself;
+there is no wider register to grow into, unlike `veda_attr`. Two real alternatives were weighed: (a)
+split plain `POPULATE` across two instructions/registers, mirroring how `.fast` already splits
+Length-staging (via `veda_attr`) from the per-call `Base`, or (b) leave plain `POPULATE`'s own
+encoding completely unchanged and accept an explicit, named scope limit on it specifically.
+**Decided: (b) -- plain `VEDA_ODT_POPULATE` keeps its exact current encoding, unchanged, and
+therefore can only directly create objects up to 65,536 bytes (its own `Length[31:16]` slice stays
+16 bits, always zero-extended into the ODT's now-24-bit Length field).** Reasoning: this is a
+strictly smaller, zero-risk, zero-behavior-change footprint than redesigning a second, already-shipped
+instruction's calling convention, `VEDA_ODT_POPULATE_FAST` already exists specifically as the
+higher-capability path (Milestone 18) and, per Break 2, already carries a 24-bit-capable `Length` once
+`veda_attr` widens -- so no real capability is lost, only re-homed onto the instruction that already
+existed to hold it. Software needing an object above 64 KiB must use `.fast` (or `Rebind` against an
+ODT entry populated some other way); this is recorded here as an explicit, permanent scope statement
+about plain `POPULATE`, not a silent gap -- symmetric with how this project already treats every other
+named "not yet done."
+
+**ODT entry's own Length field:** widens 16->24 bits using its own two already-spare bytes
+(`odt_mem[]` offsets 14-15, confirmed spare by the byte-budget audit against the ODT's own header
+comment) rather than shifting `Perms`/generation/`valid`/`owner_hart`/`id_hi`/retired-bit down by a
+byte -- the smaller-blast-radius option of the two real choices found (the alternative would touch
+roughly a dozen `odt_mem[$veda_odt_addr+N]` sites across the file for no benefit).
+
+**The "unbounded" sentinel invariant, made explicit for the first time:** every one of the 8
+`veda_pcc_length`/`veda_mepcc_length` "unbounded" comparisons (`veda_core.tlv:628-630,2714,2876,
+2871-2878,2900-2906,3140`, and the Sail-side `VEDA_PCC_UNBOUNDED`) hard-codes the literal `16'hFFFF`
+without the underlying rule ever being written down as a named invariant anywhere in the file.
+**Decided, and now recorded as an explicit invariant: the unbounded sentinel is always "all-ones of
+the field's current declared width."** This is not a new rule -- it is the same rule every existing
+site already encodes -- but widening forces every literal to be re-derived, and doing that
+consistently requires the rule to be named once rather than independently re-inferred at each of the
+eight sites. Concretely becomes `24'hFFFFFF`.
+
+**GDB-stub / C-emulator support is in scope for the same milestone, not deferred.**
+`c_emulator/riscv_model_impl.{h,cpp}`'s `pack_veda_capability_reg` (hard-coded 16-byte output buffer)
+and `c_emulator/gdbstub.cpp`'s register-read loop and target-description XML (`count="16"`,
+`bitsize="128"`) all serialize the capability register for a connected debugger. Left unwidened
+alongside the Sail-side change, these would silently truncate every capability register a developer
+reads over GDB post-widening -- a real, silent regression in a tool this project's own
+`DEVELOPER_WORKFLOW_GUIDE.md` documents as load-bearing. **Decided: update these in the same
+implementation pass as the Sail model, not as separately-scoped follow-on work**, since the risk is
+silent corruption of debugger output, not a missing feature.
+
+**What this changes about the two "Not yet done" implementation items above:** both are still real,
+separately-scoped work with their own tests -- but "the actual Sail respec" now names five concrete
+sub-changes (struct/pack-unpack widths, `veda_attr` widening, ODT Length using its spare bytes, the
+sentinel becoming `24'hFFFFFF`, the GDB-stub serialization), and "the actual RTL implementation" now
+additionally includes the tag-store granule change (Break 1), which is the one item in the whole scan
+that needed a real design decision rather than a mechanical edit, and is judged the single highest-risk
+piece of this whole milestone -- it directly gates the tag mechanism's own correctness, the primitive
+this entire architecture's memory-safety claim rests on. Sail work is sequenced first (this project's
+own established Sail-before-RTL pattern, restated explicitly here since the 2026-08-16 entry did not
+commit to an order), each of the two layers gets its own positive/negative tests and mutation test for
+the widened bounds behavior specifically (not just a re-run of existing tests with wider literals),
+and a dedicated adversarial test targets Break 1 directly: constructing a capability store adjacent to
+unrelated poisoned data and confirming the poisoned bytes' tag is never spuriously set.
+
+## DECIDED, 2026-08-19 (same day): a thorough pre-implementation audit -- explicitly requested,
+## because "widen two fields" was still hiding real unknowns
+
+The 2026-08-19 entry above was itself audited before writing any code -- not out of process for its
+own sake, but because a direct question was asked: does treating this as "mechanical" understate a
+change to a time-critical, deterministic-performance, embedded-line core's own core format? It did.
+Six real findings, each changing or hardening a decision above.
+
+**Completeness re-scan found real touch points the first pass missed, one of which forces a genuinely
+new decision:**
+- **CSeal writes `cs2.Offset` directly into `otype`** (`veda_cap_insts.sail:288`, RTL
+  `veda_core.tlv:1730`) -- a real cross-field-width coupling, not a copy-fix, once `Offset` grows past
+  `otype`'s unchanged 16 bits. Widening `otype` too was considered and rejected -- it was never named
+  as changing in the 2026-08-16 decision, has its own established 16-bit sentinel scheme
+  (`0xFFFF`/`0xFFFE`) used extensively elsewhere, and widening it would itself open new touch points
+  for no benefit. Silently truncating `cs2.Offset` to 16 bits on the way into `otype` was also
+  rejected: two different `Offset` values differing only in bits above 15 would alias to the same
+  `otype`, a real type-confusion risk in the exact mechanism (`CSeal`/`CUnseal`) that exists to
+  authenticate types -- and per this project's own standing discipline, a silent failure here is
+  strictly worse than a loud one. **Decided: CSeal requires `cs2.Offset`'s bits above 15 to be zero as
+  an explicit precondition, trapping (reusing the existing CSeal-authorization violation path) if
+  violated, rather than truncating.** Legitimate existing uses (anything that only ever used values a
+  16-bit `Offset` could hold) are unaffected byte-for-byte; only a newly-possible, previously-unreachable
+  input is newly, loudly rejected.
+- **`OCRETURN` writes `veda_pcc_length` independently of `OCInvoke`** (`veda_cap_insts.sail:647-648`,
+  RTL `veda_core.tlv:2873/2880`) -- both narrow the live compartment from a capability's `Length`; both
+  copy sites need the same width change, tracked together now, not just OCInvoke's.
+- **The `VEDA_PCC_UNBOUNDED`/`0xFFFF` sentinel is a ~15-site family, not the CSR plumbing alone**:
+  fetch-time enforcement (`veda_core.tlv:628-630`, the real security boundary), purecap data-access
+  gating (`3139-3140`), CSR-escape gating (`2711-2714`), the mtvec-gate itself
+  (`veda_regs.sail:219`), and the mret-restore mux (already known) all independently hardcode the
+  same all-ones comparison. All ~15 sites move to the new sentinel together in the same change, or the
+  fetch-bounds check, the purecap gate, the mtvec-gate, and the mret-restore mux go inconsistent with
+  each other silently -- exactly the class of cross-mechanism drift this project's own R21 was.
+- **Veda-Atomic (9 AMO ops) is a real, separate touch point** (`veda_atomic_insts.sail:72`, RTL
+  `veda_core.tlv:2445/2456`) -- its own bounds-check call site and its own `{48'b0,...}` zero-extension
+  literal, sharing the underlying mechanism with OCL.C/OCS.C but not the same code path.
+- **OSpecialRW's privilege gate and the U-mode compartmentalization gate itself are confirmed clean**
+  -- read directly, neither references `Length`/`Offset` anywhere (tag/otype/perms only); ruled out by
+  evidence, not by not looking.
+- **Three real toolchain-layer hardcodes, outside Sail/RTL entirely**: `veda_rt.h`'s
+  `veda_rt_init(uint16_t length, uint16_t perms)` packs the `veda_attr` CSR in C and needs a real
+  signature/packing change once `Length` exceeds 16 bits; `VedaShadowPropagation.cpp`'s
+  `kVedaCapTableSlotBytes = 16` (Toolchain M13/M15's per-global capability table sizing) must track the
+  new byte count; and a `slli ..., 16` descriptor-packing pattern recurs in 9 real, already-shipped
+  bootstrap `.S` files (`veda_global_protect_entry.S` and 8 others) that construct plain
+  `VEDA_ODT_POPULATE`'s `Base|Length|Perms` GPR descriptor by hand. **This last one turns out to need
+  zero changes**, precisely because of this same date's Break-3 decision (plain `POPULATE` keeps its
+  exact current 16-bit-`Length`-slice encoding, unchanged) -- these 9 files never construct a
+  descriptor wider than 16-bit `Length` today and will keep working byte-for-byte identically.
+  `container_of`'s demo and `veda_rt_asm.S`'s `csetbounds` calls were checked and confirmed clean (no
+  capability-byte-count assumption in either).
+
+**Tag-granule decision (Break 1) reversed, on real evidence, not preference.** Real primary-source
+research (the CHERI ISA specification, the CHERI Concentrate paper, ARM's own Memory Tagging Extension
+whitepaper, and Oracle SPARC M7 ADI documentation) found a **unanimous real-hardware pattern**: every
+shipped or heavily-cited tagged-memory design uses a **fixed, power-of-two tag granule** and handles
+objects that don't divide evenly into it by **rounding the storage slot up to the granule boundary and
+accepting the padding as a known, quantified cost** -- ARM's own MTE whitepaper states this explicitly
+and measures it ("the increase is usually small"). No real design was found that subdivides a single
+tag's coverage into a finer granule to fit an odd object size -- the one paper gesturing that direction
+(Multi-Tag, AsiaCCS 2023) still uses coarse, stacked granules, not sub-object tracking, per what was
+retrievable of it. This directly weighs against the earlier 2-byte fine-granule choice, which had no
+real precedent behind it.
+
+A real, both-designs Yosys synthesis check (same methodology as every other check in this document)
+confirmed the literature's implication with real numbers: a 9-write fine-granule tag-write module (the
+2-byte-granule design) costs **540 mapped cells** against a 2-write coarse-granule design's **75** --
+**7.2x more area** -- while both designs show the **identical 15-gate-level critical path** (writes are
+parallel, not serial, so more ports cost area, not depth -- a real, reassuring, non-obvious result for
+Fmax specifically). A real usage-pattern check found the current test corpus has never exercised more
+than 1-2 concurrently-spilled capabilities in TCM scratch or SSC storage against 256 slots available
+today -- halving that to 128 slots under a coarser, 32-byte-aligned scheme leaves 64-128x real headroom,
+not a live constraint.
+
+**Decided: reverse Break 1. Keep the tag-store's granule at exactly 16 bytes, completely unchanged --
+`>>4` stays `>>4`, `ELFMEM_SIZE/16`/`TCM_SCRATCH_SIZE/16` stay as they are, zero code touched in the
+existing tag-index computation. Require capability-store addresses to remain 32-byte aligned (the
+next granule boundary up from today's 16-byte alignment); one capability-store now sets/clears exactly
+2 adjacent, always-contiguous granule bits (never 9, never a runtime-variable count) in the same single
+clock edge the existing 16-byte write already uses -- confirmed against the real RTL
+(`veda_core.tlv:3711-3746`) to be the same single-`always_ff`-block, single-cycle pattern OCS.D and
+ODT-Populate already use at other widths, so this does not, by construction, introduce a new
+register-backed hold/stall mechanism.** This is simultaneously the option with real hardware precedent,
+the cheapest by a wide margin, equally fast, and the smallest possible blast radius (the entire granule
+mechanism itself is now untouched code).
+
+**Real-time audit cross-check: two clean, one open item, named honestly.** Re-derived against the live
+`REALTIME_SAFETY_CRITICAL_AUDIT_RESULTS.md` reasoning, not just its headline conclusions: the
+WCET-analyzability argument depends on the DRAM-stall being a fixed, data-independent constant, never
+on capability size, so widening cannot touch it; the DRAM-stall's own cycle formula
+(`$veda_dram_stall_req`/`$veda_dram_stall_cnt`) contains no width term and is physically grounded in a
+DDR4 row-access cost that doesn't scale with an 18-vs-16-byte transfer either, so no interaction there
+either. **The one genuinely open item, not resolved by reasoning alone**: the audit's own "exactly one
+hold/stall mechanism in the whole file" claim is a snapshot fact about the file as it exists today, and
+the chosen 2-granule-write design does not by construction need a new one -- but this must be
+**re-verified against the real, changed RTL once it exists**, using the audit's own method (grep every
+`busy|stall|freeze|hold|wait` and `$pc`/NOP-forcing site), not presumed to still hold from this
+document's reasoning alone. This re-verification is added as an explicit, required step of the RTL
+milestone's own test/results doc, not assumed.
+
+**Embedded-domain fit: the 16 MB target itself is reconsidered, on real evidence, independent of the
+widen-vs-compress choice.** Real, named embedded/MCU datasheets (Nordic nRF52, ST STM32F2/H7, Microchip
+SAM4S/D51) show on-chip SRAM topping out around 1 MB even on the largest, most expensive Cortex-M7-class
+parts available; RFC 7228's own constrained-device taxonomy tops its largest class at ~50 KB RAM. Against
+this real data, a 16 MB single-object ceiling is not "modest, data-structure-sized" (this line's own
+stated philosophy) -- it exceeds the *entire* on-chip SRAM of nearly every real embedded target, several
+times over even the largest ones, and was in fact sized against this project's own 512 KB *simulation*
+memory constant (`ELFMEM_SIZE`), not real target hardware, when first decided. Separately, real research
+into CHERIoT (MICRO'23, the closest real published embedded-CHERI precedent) confirms it uses a
+*compressed* capability (65 bits total: 32-bit metadata + 32-bit address + tag, via a floating-point-style
+B/T/E encoding) specifically to get large dynamic range cheaply -- but CHERIoT's own reference
+implementation is the Ibex core, which is pipelined, not single-cycle, so this does not weaken this
+project's own single-cycle-specific reasoning for rejecting compression (2026-08-16 entry, Reason 3) --
+it is evidence about *range-per-bit*, not about *pipelining*, and the two decisions are separable.
+
+**Decided: reduce the target from 24-bit to 20-bit `Length`/`Offset` (max object size 64 KB -> 1 MiB,
+not 16 MiB).** 1 MiB is a real, evidence-grounded ceiling -- it matches, almost exactly, the largest
+on-chip SRAM found on real high-end embedded targets (STM32H7-class), rather than an internal
+simulation constant, and is still a real 16x increase over today's 64 KB ceiling, not a token change.
+This does not reopen the widen-vs-compress decision (unaffected, still single-cycle-specific) and does
+not change the tag-granule decision above (the resulting total width -- 127 - 32 + 40 = 135, +1 pad =
+**136 bits (17 bytes)** -- still falls in the 17-32-byte range the 2-granule/32-byte-alignment design
+already covers without modification; 17 bytes needs exactly 2 granules exactly as 18 bytes did). The
+24-bit/68-gate-level/921-cell synthesis numbers in the 2026-08-16 entry were measured for the
+now-superseded 24-bit target; a 20-bit path is expected to be strictly cheaper (narrower adders/muxers
+throughout) but this is stated as an expectation, not asserted as measured -- **a fresh synthesis check
+at the real 20-bit width is a required step before the RTL milestone is called done**, not inherited
+by assumption from the 24-bit numbers.
+
+**Updated total: 136 bits (17 bytes), not 144 (18).** Every site catalogued in the 2026-08-19 entry
+above is unchanged in *kind*, only in the concrete widths substituted at implementation time (20-bit
+slices and an all-ones sentinel of `20'hFFFFF`, not 24-bit/`24'hFFFFFF`).
+
 ## CLOSED, 2026-08-16 (same day): R21 -- DRAM-stall could swallow a real trap redirect
 
 Found on the Linux line while adversarially refuting an unrelated timing claim, then independently
@@ -1020,3 +1280,48 @@ interrupt-to-handler latency number exists yet for this core (RISC-V's own spec 
 implementation-defined, so nothing supplies one for free); Veda-Core's own custom trap-cause
 priority has not been cross-checked against RISC-V's official synchronous-exception priority table
 (Table 105) where they overlap; WFI's real behavior on this core was not itself audited this pass.
+
+## DONE, 2026-08-19 (same day): Length/Offset widening implemented in Sail, 70/70 regression
+
+Full write-up: `MILESTONE_LENGTH_OFFSET_WIDENING_RESULTS.md`. Implements both same-day "DECIDED"
+entries above -- `capability.Length`/`.Offset`/`odt_entry.Length`: `bits(16)` -> `bits(20)`; packed
+capability 128 -> 136 bits (17 bytes); `VEDA_PCC_UNBOUNDED` sentinel `0xFFFF` -> `0xFFFFF`; `veda_attr`
+CSR widened 32 -> 36 bits (Perms kept at its original `[15..0]`, only Length's own span grew); every
+touch point the prior audit named, across `veda_types.sail`/`veda_regs.sail`/`veda_cap_insts.sail`/
+`veda_ocl_insts.sail`/`veda_bind_insts.sail`, plus the GDB stub's own 17-byte capability-register
+XML/buffer.
+
+**Three real findings beyond the mechanical bit-slice work, all fixed this pass:** (1) CSeal's own
+`otype = cs2.Offset` assignment is a genuine narrowing truncation now (otype deliberately did NOT
+widen) -- fixed with an explicit "upper 4 bits must be zero" precondition on the one real mint site,
+and a `zero_extend(cs1.otype)`-based comparison (mathematically equivalent, simpler) on CUnseal/OCJALR's
+own compare-only sites; (2) OCL.C/OCS.C now hard-require 32-byte-aligned store addresses (new cause
+`VEDA_CAUSE_ALIGNMENT_VIOLATION=0x08`) -- real Sail/RTL parity with the already-decided 2-granule RTL
+tag-write design, not something Sail's own tag mechanism strictly requires, but needed so Sail's
+reference behavior doesn't diverge from what RTL will enforce; (3) `mem_metadata.sail`'s own tag-store
+implementation had a real, previously-undiscovered single-granule bug (verified only against a
+synthetic RTL-mockup synthesis check in the prior audit, never against this file's own real logic) --
+a 17-byte capability's own 17th byte always spills into a second granule the old code never touched
+at all, meaning that byte's data reached RAM unprotected by the tag mechanism; fixed to touch/check
+both of an access's real granules.
+
+Also found and fixed, not part of the original touch-point map: ~20 pre-existing `sail_tests/*.S`
+files hardcoded the OLD `0xFFFF` sentinel literal at sites meaning "the real unbounded PCC value,"
+now silently wrong (one produced a genuine multi-minute simulator hang before being caught and fixed);
+and one existing OCL.C/OCS.C-spill test's own SPILL object was sized for the old 16-byte capability
+exactly, correctly `BOUNDS_VIOLATION`-trapping until re-sized.
+
+**Verification:** 70/70 full regression (65 pre-existing + 5 new: widened-bounds positive/negative,
+CSeal-offset-high-bits negative, OCL.C/OCS.C alignment negative, and a dedicated adversarial
+granule-adjacency test proving no spurious tag-sharing beyond the real 2-granule span). Mutation-tested
+all three new mechanisms (CSeal precondition, alignment gate, multi-granule tag write) -- each
+correctly flips its own new test to `FAILURE` when disabled, reverts cleanly to 70/70.
+
+**Not yet built, named honestly:** the RTL mirror (`rtl/veda_core.tlv` still has the old 128-bit/
+16-byte format throughout -- CRF fields, pack/unpack, `tag_mem` sizing, the `16'hFFFF` sentinel family,
+~15 sites per the prior audit), a fresh Yosys synthesis check at the *real* 20-bit width (the prior
+audit's 540-vs-75-cell numbers were measured on synthetic mockups for comparing granule strategies in
+the abstract, not this real width), the required re-verification of
+`REALTIME_SAFETY_CRITICAL_AUDIT_RESULTS.md`'s "exactly one hold mechanism" claim against the actual
+changed RTL, and the toolchain layer (`veda_rt.h`'s `veda_rt_init` signature,
+`VedaShadowPropagation.cpp`'s `kVedaCapTableSlotBytes`). Not committed or pushed yet.
